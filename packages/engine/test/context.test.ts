@@ -273,7 +273,7 @@ test("the hand-offs block: where each colleague is, an answer's start until it w
     '- @rita, since 16:58 (2 min ago): did its part and waits for agents it handed some to. You handed it: "Rita vai ser apagada. Passa ao diogo a tua pasta e tudo o que sabes."',
     '- @rita, since 16:58 (2 min ago): not started: the agents reached what they may do on their own; a person can let it go on (Continuar). You handed it: "Rita vai ser apagada. Passa ao diogo a tua pasta e tudo o que sabes."',
     '- @rita, since 16:58 (2 min ago): working on it. You asked: "Como o staging sobe?"',
-    "Each outcome reaches you here by itself, even after your turn ends; what you handed off in one turn comes back together. Until then don't check on it, send it again or do its part. If someone asks, say who has what and since when; never say a colleague hasn't answered or that nothing happened while its part is open.",
+    "Each outcome reaches you here by itself, even after your turn ends; what you handed off in one turn comes back together. Until then don't check on it, send it again or do its part. If someone asks, say who has what, since when and, from its latest steps and posts above, how it is going; never say a colleague hasn't answered or that nothing happened while its part is open.",
   ]);
   const long = `O staging sobe da branch main pelo deploy.sh, ${"com cada passo descrito ".repeat(10)}`;
   const closed = handOffsBlock(
@@ -293,6 +293,103 @@ test("the hand-offs block: where each colleague is, an answer's start until it w
     "- @rita, since 16:58: no answer by 16:59",
   ]);
   expect(handOffsBlock([], "UTC")).toBeNull();
+  const progressing = handOffsBlock(
+    [
+      {
+        ...base,
+        target: run("running"),
+        progress: {
+          steps: [
+            { line: "started tool web_search", at: at("16:59") },
+            { line: "tool web_search finished", at: at("17:00") },
+          ],
+          latest: { posts: 2, latest: "Achei três vagas, falta @ana revisar.", at: at("16:59") },
+        },
+      },
+    ],
+    "Europe/Lisbon",
+    now,
+  );
+  expect(progressing?.split("\n")[2]).toBe(
+    '- @rita, since 16:58 (2 min ago): working on it. You handed it: "Rita vai ser apagada. Passa ao diogo a tua pasta e tudo o que sabes." Latest steps: 1 min ago: started tool web_search; 0 min ago: tool web_search finished. Posted 2 so far, latest 1 min ago: "Achei três vagas, falta ana revisar."',
+  );
+});
+
+test("the hand-offs block: an open hand-off shows its run's latest steps and post, read without running it", async () => {
+  const infra = await createAgent(
+    f.db,
+    f.owner.id,
+    f.org.id,
+    { name: "Infra", handle: "infra", role: "Infrastructure", credentialId: f.credential.id },
+    { model: "claude-sonnet-5-5" },
+  );
+  const trigger = await postPersonMessage({ db: f.db, pubsub: f.pubsub }, f.owner.id, f.org.id, f.general.id, {
+    body: "@dev manda o infra subir o staging",
+  });
+  const [asker] = await f.db.select().from(schema.agentRuns).where(eq(schema.agentRuns.triggerMessageId, trigger.id));
+  if (!asker) throw new Error("no run");
+  const dm = await openAgentDm(f.db, f.org.id, f.agent.id, infra.id);
+  const note = await insertMessage(f.db, {
+    orgId: f.org.id,
+    channelId: dm.id,
+    author: { type: "agent", agentId: f.agent.id, runId: asker.id, hop: 1 },
+    body: "Sobe o staging.",
+  });
+  const [target] = await f.db
+    .insert(schema.agentRuns)
+    .values({
+      orgId: f.org.id,
+      agentId: infra.id,
+      channelId: dm.id,
+      threadRootId: note.id,
+      triggerMessageId: note.id,
+      trigger: "dm",
+      hop: 2,
+      status: "running",
+    })
+    .returning();
+  if (!target) throw new Error("no run");
+  await f.db.insert(schema.agentConsultations).values({
+    orgId: f.org.id,
+    kind: "note",
+    askerRunId: asker.id,
+    askerAgentId: f.agent.id,
+    targetAgentId: infra.id,
+    targetRunId: target.id,
+    channelId: dm.id,
+    messageId: note.id,
+    waitId: `async:${Bun.randomUUIDv7()}`,
+    question: "Sobe o staging.",
+    chain: [f.agent.id],
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  await f.db.insert(schema.agentRunSteps).values(
+    ["deploy", "logs", "health", "smoke", "notify"].map((name, i) => ({
+      orgId: f.org.id,
+      runId: target.id,
+      seq: i + 1,
+      kind: "tool_call" as const,
+      data: { name },
+      createdAt: new Date(Date.now() - (5 - i) * 1000),
+    })),
+  );
+  await insertMessage(f.db, {
+    orgId: f.org.id,
+    channelId: dm.id,
+    author: { type: "agent", agentId: infra.id, runId: target.id, hop: 2 },
+    body: "Deploy feito, rodando o smoke test.",
+  });
+  const text = systemText((await buildRunContext(f.db, asker, f.agent, { maxMessages: 30 })).system);
+  expect(text).toContain(
+    "Latest steps: 0 min ago: started tool logs; 0 min ago: started tool health; 0 min ago: started tool smoke; 0 min ago: started tool notify.",
+  );
+  expect(text).toContain('Posted 1 so far, latest 0 min ago: "Deploy feito, rodando o smoke test."');
+  expect(text).not.toContain("started tool deploy");
+  const [status] = await f.db
+    .select({ status: schema.agentRuns.status })
+    .from(schema.agentRuns)
+    .where(eq(schema.agentRuns.id, target.id));
+  expect(status?.status).toBe("running");
 });
 
 test("the hand-offs block: only this agent's, from this conversation, the last day; never for a routine or between agents", async () => {

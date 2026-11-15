@@ -1357,7 +1357,7 @@ export function handOffsBlock(rows: HandOff[], zone: string, now = new Date(), p
     if (h.status === "open")
       return `- ${since} (${ago(h.createdAt, now.getTime())}): ${handOffState(h)}. ${
         h.kind === "note" ? "You handed it" : "You asked"
-      }: "${handOffQuote(h.question)}"`;
+      }: "${handOffQuote(h.question)}"${handOffProgressLine(h, now)}`;
     const when = at(h.answeredAt ?? now);
     if (h.status === "answered")
       return `- ${since}: done at ${when}${!h.reportedAt && h.answer ? `: "${handOffQuote(h.answer)}"` : ""}`;
@@ -1369,8 +1369,19 @@ export function handOffsBlock(rows: HandOff[], zone: string, now = new Date(), p
     "# Work you handed off here",
     `What the agents you handed work to or asked from here are doing, as of this turn (${timeZone}):`,
     ...lines,
-    `Each outcome reaches you here by itself, even after your turn ends; what you handed off in one turn comes back together. Until then don't check on it, send it again or do its part. If someone asks, say who has what and since when; never say ${personal ? "another agent" : "a colleague"} hasn't answered or that nothing happened while its part is open.`,
+    `Each outcome reaches you here by itself, even after your turn ends; what you handed off in one turn comes back together. Until then don't check on it, send it again or do its part. If someone asks, say who has what, since when and, from its latest steps and posts above, how it is going; never say ${personal ? "another agent" : "a colleague"} hasn't answered or that nothing happened while its part is open.`,
   ].join("\n");
+}
+
+function handOffProgressLine(h: HandOff, now: Date) {
+  if (!h.progress) return "";
+  const steps = h.progress.steps.map((s) => `${ago(s.at, now.getTime())}: ${s.line}`);
+  const latest = h.progress.latest;
+  return `${steps.length ? ` Latest steps: ${steps.join("; ")}.` : ""}${
+    latest
+      ? ` Posted ${latest.posts} so far, latest ${ago(latest.at, now.getTime())}: "${handOffQuote(latest.latest)}"`
+      : ""
+  }`;
 }
 
 /** The root of a thread made from a range carries only its title: say what it is. */

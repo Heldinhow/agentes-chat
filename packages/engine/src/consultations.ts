@@ -36,19 +36,22 @@ import type { Notice } from "./notices";
 import { notifyAgentUnreached } from "./notification-producers";
 import { runReadOutsideById } from "./outside";
 import { actingRoutineOfCall, personBehindCall, routineCreatorOf } from "./requester";
+import { isRightHand } from "./right-hand";
 import { isRoutineRoomKey } from "./routine-brief";
 import { stoppedToSend } from "./run-inbox";
 import { deliverNoticeToRun, resumeRunWithResult } from "./run-resume";
 import { tellAgentStopped } from "./run-stopped";
 import { type AgentRun, isTerminal, outageParkedSql, type RunStatus, replyThreadOf } from "./runs";
 import { MAX_HANDOFF_LINKS, refusedAtLimit } from "./stretch";
+import { stepLine } from "./talker-snapshot";
 import { noAgentText } from "./team";
+import { scrubSignIns } from "./tool-detail";
 import type { ToolContext, ToolDefinition, ToolOutput, ToolSource } from "./tools/types";
 import { untrustedBlock } from "./untrusted";
 import { USAGE_WAIT_CODES } from "./usage-pause";
 import { inWorkspaceWords } from "./workspace-mode";
 
-const { agentConsultations, agentRuns, agents, channels, machines, messages, outbox, users } = schema;
+const { agentConsultations, agentRunSteps, agentRuns, agents, channels, machines, messages, outbox, users } = schema;
 
 export const ASK_AGENT_TOOL = "ask_agent";
 export const TELL_AGENT_TOOL = "tell_agent";
@@ -915,10 +918,12 @@ export interface HandOff {
   target: { status: RunStatus; waitingMachineId: string | null; handedOn: boolean; outage?: boolean } | null;
   /** No run yet: its wake waits outside any run, for its agent to leave the line or for room (`INBOX_JOB`, `LATER_JOB`). */
   parked?: boolean;
+  progress?: { steps: { line: string; at: Date }[]; latest: { posts: number; latest: string; at: Date } | null };
 }
 
 /** How many of them the block lists. */
 const HAND_OFFS_LISTED = 8;
+const HAND_OFF_STEPS = 4;
 
 /**
  * What this agent asked or handed off from the conversation `run` works in (in a channel: its thread, or its main
@@ -938,6 +943,9 @@ export async function handOffsFrom(
     id: string;
     kind: HandOff["kind"];
     status: HandOff["status"];
+    target_run_id: string | null;
+    dm_id: string;
+    builtin: string | null;
     question: string;
     answer: string | null;
     handle: string;
@@ -950,7 +958,7 @@ export async function handOffsFrom(
     outage: boolean | string | null;
     parked: boolean | string | null;
   }>(
-    await db.execute(sql`select c.id, c.kind, c.status, c.question, c.answer, a.handle, c.created_at, c.answered_at,
+    await db.execute(sql`select c.id, c.kind, c.status, c.target_run_id, c.channel_id as dm_id, a.builtin, c.question, c.answer, a.handle, c.created_at, c.answered_at,
         c.reported_at, t.status as target_status, t.waiting_machine_id,
         exists (select 1 from agent_consultations s where s.asker_run_id = t.id and s.status = 'open') as handed_on,
         (t.status = 'waiting_input' and t.transcript -> 'outage' is not null) as outage,
@@ -969,6 +977,9 @@ export async function handOffsFrom(
       limit ${HAND_OFFS_LISTED}`),
   );
   const date = (v: string | Date | null) => (v === null ? null : new Date(v));
+  const progressOf = options.openOnly
+    ? new Map<string, HandOff["progress"]>()
+    : await handOffProgress(db, run.orgId, rows);
   return rows.map((r) => ({
     id: r.id,
     kind: r.kind,
@@ -988,7 +999,55 @@ export async function handOffsFrom(
         }
       : null,
     ...(r.parked === true || r.parked === "t" ? { parked: true } : {}),
+    ...(r.target_run_id && progressOf.has(r.target_run_id) ? { progress: progressOf.get(r.target_run_id) } : {}),
   }));
+}
+
+async function handOffProgress(
+  db: Executor,
+  orgId: string,
+  rows: {
+    status: string;
+    target_run_id: string | null;
+    dm_id: string;
+    builtin: string | null;
+    created_at: string | Date;
+  }[],
+) {
+  const open = (
+    await Promise.all(
+      rows.map(async (r) =>
+        r.status === "open" && r.target_run_id && !(await answersAgentsOnly(db, orgId, r.target_run_id))
+          ? [{ runId: r.target_run_id, dmId: r.dm_id, since: new Date(r.created_at), scrub: isRightHand(r) }]
+          : [],
+      ),
+    )
+  ).flat();
+  const posts = await progressIn(db, orgId, open);
+  const clean = (text: string, scrub: boolean) => (scrub ? scrubSignIns(text, "••••").text : text);
+  return new Map(
+    await Promise.all(
+      open.map(async (t) => {
+        const steps = await db
+          .select({ kind: agentRunSteps.kind, data: agentRunSteps.data, createdAt: agentRunSteps.createdAt })
+          .from(agentRunSteps)
+          .where(eq(agentRunSteps.runId, t.runId))
+          .orderBy(desc(agentRunSteps.createdAt))
+          .limit(HAND_OFF_STEPS);
+        const latest = posts.get(t.runId) ?? null;
+        return [
+          t.runId,
+          {
+            steps: steps.reverse().flatMap((st) => {
+              const line = stepLine(st.kind, st.data);
+              return line ? [{ line: clean(line, t.scrub), at: st.createdAt }] : [];
+            }),
+            latest: latest && { ...latest, latest: clean(latest.latest, t.scrub) },
+          },
+        ] as const;
+      }),
+    ),
+  );
 }
 
 /**

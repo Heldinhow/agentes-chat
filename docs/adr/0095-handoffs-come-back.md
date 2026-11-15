@@ -86,3 +86,22 @@ A few questions and notes between the same two agents within minutes drew one ro
   aprovação", the pulsing wait mark in the arrows' place), before the list hears the run park. Waiting on someone else,
   its words are quiet and the arrows still.
 
+
+## Addendum (2026-11-15): the sender can say how a hand-off is going
+
+- **The gap.** Asked "how is it going?" while a hand-off was out, the sender could only say who had it and since
+  when: "# Work you handed off here" carried its state, not its progress. The person saw the other agent's step on the
+  working line and in "Ver", but the agent they asked couldn't tell them, and the block forbids checking on the work.
+- **Now.** Each open hand-off with a run in that block also carries what the run did and posted so far, read when the
+  sender's turn is built and never by running or interrupting the other agent: its latest `HAND_OFF_STEPS` (4) steps
+  as `stepLine` words (the lines "# Your background work here" uses, ADR 0121) and how many messages it posted in the
+  agents' DM with the start of its latest (`progressIn`, the data the working line's "Ver" shows). The block tells the
+  sender to answer from them. `wakesLater` (`openOnly`) reads none of it.
+- **What stays out.** A run that answers agents only (`answersAgentsOnly`) shows no progress, as its answer stays out
+  of the people's views; the right hand's steps and post go through `scrubSignIns`; the post is quoted short and
+  without `@`, like the question.
+- **No new notices.** What comes of a hand-off still reaches the sender by itself, and only at its milestones: its
+  result, a failure, or its expiry (`closeConsultation`, `reportHandOffs`). A run held on an approval or a question
+  posts its card where the person asked (`consultationCardThread`, `cardPlace`), and its state reads in the block and
+  on the working line; neither wakes the sender, so a hold costs no turn and holds up no other hand-off. Step-by-step
+  news stays out, as the rule against narrating as messages (ADR 0121) asks, so nothing here needs a setting.
