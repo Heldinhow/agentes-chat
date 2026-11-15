@@ -1381,6 +1381,10 @@ function handOffProgressLine(h: HandOff, now: Date) {
     latest
       ? ` Posted ${latest.posts} so far, latest ${ago(latest.at, now.getTime())}: "${handOffQuote(latest.latest)}"`
       : ""
+  }${
+    h.progress.computerTurn
+      ? " It works in one long turn on its computer: the commands it runs there itself show only when that turn ends, so no new step doesn't mean it stopped or hasn't started."
+      : ""
   }`;
 }
 

@@ -22,6 +22,7 @@ import { type AiStatusDeps, agentAiState } from "./ai-status";
 import { canTalkTo, speakerFor, viaAgent } from "./audience";
 import { runAuthorityById } from "./authority";
 import { routineBriefOfRun } from "./background";
+import { runBrainOf } from "./brains/select";
 import { type BrakeOutcome, brakeWakes, callableAgents, LATER_JOB, notCallableText } from "./brakes";
 import { canceledBy, stopRun } from "./cancel";
 import { publishDelivery } from "./delivery";
@@ -918,7 +919,11 @@ export interface HandOff {
   target: { status: RunStatus; waitingMachineId: string | null; handedOn: boolean; outage?: boolean } | null;
   /** No run yet: its wake waits outside any run, for its agent to leave the line or for room (`INBOX_JOB`, `LATER_JOB`). */
   parked?: boolean;
-  progress?: { steps: { line: string; at: Date }[]; latest: { posts: number; latest: string; at: Date } | null };
+  progress?: {
+    steps: { line: string; at: Date }[];
+    latest: { posts: number; latest: string; at: Date } | null;
+    computerTurn?: boolean;
+  };
 }
 
 /** How many of them the block lists. */
@@ -944,6 +949,7 @@ export async function handOffsFrom(
     kind: HandOff["kind"];
     status: HandOff["status"];
     target_run_id: string | null;
+    target_brain: string | null;
     dm_id: string;
     builtin: string | null;
     question: string;
@@ -958,7 +964,7 @@ export async function handOffsFrom(
     outage: boolean | string | null;
     parked: boolean | string | null;
   }>(
-    await db.execute(sql`select c.id, c.kind, c.status, c.target_run_id, c.channel_id as dm_id, a.builtin, c.question, c.answer, a.handle, c.created_at, c.answered_at,
+    await db.execute(sql`select c.id, c.kind, c.status, c.target_run_id, coalesce(t.brain, a.brain) as target_brain, c.channel_id as dm_id, a.builtin, c.question, c.answer, a.handle, c.created_at, c.answered_at,
         c.reported_at, t.status as target_status, t.waiting_machine_id,
         exists (select 1 from agent_consultations s where s.asker_run_id = t.id and s.status = 'open') as handed_on,
         (t.status = 'waiting_input' and t.transcript -> 'outage' is not null) as outage,
@@ -1009,6 +1015,8 @@ async function handOffProgress(
   rows: {
     status: string;
     target_run_id: string | null;
+    target_status: RunStatus | null;
+    target_brain: string | null;
     dm_id: string;
     builtin: string | null;
     created_at: string | Date;
@@ -1018,7 +1026,15 @@ async function handOffProgress(
     await Promise.all(
       rows.map(async (r) =>
         r.status === "open" && r.target_run_id && !(await answersAgentsOnly(db, orgId, r.target_run_id))
-          ? [{ runId: r.target_run_id, dmId: r.dm_id, since: new Date(r.created_at), scrub: isRightHand(r) }]
+          ? [
+              {
+                runId: r.target_run_id,
+                dmId: r.dm_id,
+                since: new Date(r.created_at),
+                scrub: isRightHand(r),
+                computerTurn: r.target_status === "running" && runBrainOf({ brain: r.target_brain }) !== "model",
+              },
+            ]
           : [],
       ),
     )
@@ -1043,6 +1059,7 @@ async function handOffProgress(
               return line ? [{ line: clean(line, t.scrub), at: st.createdAt }] : [];
             }),
             latest: latest && { ...latest, latest: clean(latest.latest, t.scrub) },
+            ...(t.computerTurn ? { computerTurn: true } : {}),
           },
         ] as const;
       }),
