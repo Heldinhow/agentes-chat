@@ -4990,27 +4990,21 @@ async function executeRunInner(
         const secretAsks: string[] = [];
         /** Mission tools' own waits (a blocking decision, a review): their ids. */
         const waits: string[] = [];
-        // What it wrote before these calls is the first one's step line (`takeStepWords`), never posted.
+        // What it wrote before these calls is the first one's step line (`takeStepWords`), posted only as below.
         if (!run.background) holdStepWords(run.id, isRightHand(agent) ? scrubSignIns(turnText, "••••").text : turnText);
         // Its first short line before tools in a conversation goes out live, once per run, as work_in_background's
-        // `say` does; a longer text is a pause's lead (`pauseLead`), and background work has its post_update.
-        const liveSay =
+        // `say` does: once a call ran (a card's own words speak for an approval or a question, `pauseLead`). A longer
+        // text is a pause's lead, and background work has its post_update.
+        let liveSay =
           !run.background &&
+          !unattended &&
+          !policy.mayPass &&
           !run.workId &&
           !transcript.saidLive &&
           turnText.length < WORKING_TEXT_MAX &&
           !toolUses.some((u) => u.name === WORK_IN_BACKGROUND_TOOL || u.name === PASS_TOOL)
             ? stepWords(turnText)
             : undefined;
-        if (liveSay && !repeatsLastPost(liveSay)) {
-          const said = await db.transaction((tx) => post(tx, replyThreadId, liveSay));
-          transcript.saidLive = true;
-          transcript.postedCount++;
-          // This turn's text is out: neither the closing line (`closingSummary`) nor a pause posts it again.
-          transcript.postedUpTo = transcript.messages.length;
-          const [view] = await withWikiLinks(db, run.orgId, [messageView(said)]);
-          if (view) await publishMessageCreated(deps.pubsub, view);
-        }
         for (const use of toolUses) {
           // Canceled during a tool, or the server is shutting down: the rest never run.
           if (signal.aborted) break;
@@ -5018,6 +5012,20 @@ async function executeRunInner(
           // The shutdown aborted it while it ran: its error may hide work it already did.
           const cutShort = shuttingDown();
           await absorbToolOutcome(use, outcome);
+          const words =
+            liveSay && !signal.aborted && outcome.type === "result" && !waitOf(outcome.output.data) ? liveSay : "";
+          if (words) {
+            liveSay = undefined;
+            transcript.saidLive = true;
+            if (!repeatsLastPost(words)) {
+              const said = await db.transaction((tx) => post(tx, replyThreadId, words));
+              transcript.postedCount++;
+              // This turn's text is out: neither the closing line (`closingSummary`) nor a pause posts it again.
+              transcript.postedUpTo = transcript.messages.length;
+              const [view] = await withWikiLinks(db, run.orgId, [messageView(said)]);
+              if (view) await publishMessageCreated(deps.pubsub, view);
+            }
+          }
           if (outcome.type === "approval") {
             calls.push({ toolUseId: use.id, name: use.name, approvalId: outcome.approval.id });
             waiting.push(outcome.approval);
@@ -5141,7 +5149,12 @@ async function executeRunInner(
         // card, with a reply it held back (`heldWords`). Earlier narration is in the steps. A background run never
         // posts by itself (ADR 0053 §5): its cards speak for it.
         const text = stripSentinel(turnText);
-        const spoken = run.background || liveSay ? "" : asks.length > 0 ? text : pauseLead(text);
+        const spoken =
+          run.background || transcript.postedUpTo === transcript.messages.length
+            ? ""
+            : asks.length > 0
+              ? text
+              : pauseLead(text);
         const said = await heldWords(repeatsLastPost(spoken) ? "" : spoken);
         // Its cards are its next step: a reply held for its wording no longer stands in for an answer.
         delete t.heldWording;
