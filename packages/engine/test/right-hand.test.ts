@@ -333,7 +333,7 @@ test("nothing said to it is reflected into the team's memory", async () => {
   expect((await reflectThread(f.context, { orgId: f.org.id, threadRootId: root.id })).skipped).toBe("right_hand");
 });
 
-test("in its DM its run reads its own block, not an agent's instructions", async () => {
+test("in its DM its run reads its own block first, then its own instructions when it has any", async () => {
   f = await setup({ rightHand: true });
   const [lodi] = await rightHandOf(f.org.id);
   if (!lodi) throw new Error("no right hand");
@@ -347,6 +347,10 @@ test("in its DM its run reads its own block, not an agent's instructions", async
   expect(text).toContain("this workspace's assistant: the team's right hand");
   expect(text).toContain("# Where you are\nYour private conversation with this person");
   expect(text).not.toContain("# Your instructions");
+  const own = { ...lodi, instructions: "Responda sempre em pt-BR." };
+  const withOwn = systemText((await buildRunContext(f.db, run, own, { maxMessages: 10 })).system);
+  const at = withOwn.indexOf("# Your instructions\nResponda sempre em pt-BR.");
+  expect(at).toBeGreaterThan(withOwn.indexOf("this workspace's assistant: the team's right hand"));
 });
 
 test("what it and the agents advise about computers follows where the server gets them", async () => {

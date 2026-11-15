@@ -86,7 +86,12 @@ export function holdStepWords(runId: string, text: string) {
 export function takeStepWords(runId: string): string | undefined {
   const held = stepHeld.get(runId);
   stepHeld.delete(runId);
-  const line = held ? (plainLines(redactCredentials(stripSentinel(held)).replace(/\p{Cc}/gu, " "))[0] ?? "") : "";
+  return held ? stepWords(held) : undefined;
+}
+
+/** `takeStepWords`'s words of a text: also the line a run says live before its first tools (`saidLive`). */
+export function stepWords(text: string): string | undefined {
+  const line = plainLines(redactCredentials(stripSentinel(text)).replace(/\p{Cc}/gu, " "))[0] ?? "";
   const sentence = /^.+?[.!?…:](?=\s|$)/u.exec(line)?.[0] ?? line;
   return oneLine(sentence.replace(/[.:]$/, ""), STEP_WORDS_MAX) || undefined;
 }

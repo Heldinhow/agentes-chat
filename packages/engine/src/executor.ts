@@ -204,6 +204,7 @@ import {
   publishChannelEvent,
   publishMessageCreated,
   STEP_HELD_MAX,
+  stepWords,
   takeStepWords,
 } from "./events";
 import { type Feedback, queueFeedback } from "./feedback";
@@ -562,6 +563,8 @@ export interface Transcript {
   postedCount: number;
   /** The words of the last message it posted (trimmed): saying exactly them again next adds nothing. */
   lastPosted?: string;
+  /** It already said its first line before tools live (`stepWords`): later ones stay narration in its steps. */
+  saidLive?: boolean;
   /**
    * A reply judged `untried` and held back (ADR 0109): nobody saw it. It goes out with the run's next words
    * (`heldWords`), or alone when the run ends without any (a pass, an empty turn, a closing line, a failure).
@@ -4989,6 +4992,25 @@ async function executeRunInner(
         const waits: string[] = [];
         // What it wrote before these calls is the first one's step line (`takeStepWords`), never posted.
         if (!run.background) holdStepWords(run.id, isRightHand(agent) ? scrubSignIns(turnText, "••••").text : turnText);
+        // Its first short line before tools in a conversation goes out live, once per run, as work_in_background's
+        // `say` does; a longer text is a pause's lead (`pauseLead`), and background work has its post_update.
+        const liveSay =
+          !run.background &&
+          !run.workId &&
+          !transcript.saidLive &&
+          turnText.length < WORKING_TEXT_MAX &&
+          !toolUses.some((u) => u.name === WORK_IN_BACKGROUND_TOOL || u.name === PASS_TOOL)
+            ? stepWords(turnText)
+            : undefined;
+        if (liveSay && !repeatsLastPost(liveSay)) {
+          const said = await db.transaction((tx) => post(tx, replyThreadId, liveSay));
+          transcript.saidLive = true;
+          transcript.postedCount++;
+          // This turn's text is out: neither the closing line (`closingSummary`) nor a pause posts it again.
+          transcript.postedUpTo = transcript.messages.length;
+          const [view] = await withWikiLinks(db, run.orgId, [messageView(said)]);
+          if (view) await publishMessageCreated(deps.pubsub, view);
+        }
         for (const use of toolUses) {
           // Canceled during a tool, or the server is shutting down: the rest never run.
           if (signal.aborted) break;
@@ -5119,7 +5141,7 @@ async function executeRunInner(
         // card, with a reply it held back (`heldWords`). Earlier narration is in the steps. A background run never
         // posts by itself (ADR 0053 §5): its cards speak for it.
         const text = stripSentinel(turnText);
-        const spoken = run.background ? "" : asks.length > 0 ? text : pauseLead(text);
+        const spoken = run.background || liveSay ? "" : asks.length > 0 ? text : pauseLead(text);
         const said = await heldWords(repeatsLastPost(spoken) ? "" : spoken);
         // Its cards are its next step: a reply held for its wording no longer stands in for an answer.
         delete t.heldWording;

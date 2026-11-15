@@ -33,7 +33,7 @@ const turns = (req: ModelRequest) => req.messages.filter((m) => m.role === "assi
 /** An answer past `WORKING_TEXT_MAX`: read as the answer before its turn ends. */
 const LONG = "Não dá para compilar aqui: faltam Go e gcc no computador. ".repeat(6);
 
-test("a 3-call tool loop: working text goes to the steps, never live; the answer shows only in its message, whole", async () => {
+test("a 3-call tool loop: only the first line before tools goes live, once; the rest goes to the steps; the answer shows whole", async () => {
   const env = envTool();
   f = await setup({
     toolSources: [env.source],
@@ -56,18 +56,22 @@ test("a 3-call tool loop: working text goes to the steps, never live; the answer
   await drainOutbox(f.db, f.handlers);
   expect(env.calls()).toBe(2);
 
-  // The message holds only the final answer, whole.
+  // Its first line before tools is posted as it starts, the final answer whole after it.
   const timeline = await listMessages(f.db, f.owner.id, f.org.id, f.general.id);
-  expect(timeline.map((m) => m.body)).toEqual(["@dev compila o projeto", `${LONG}Instale os dois.`.trim()]);
+  expect(timeline.map((m) => m.body)).toEqual([
+    "@dev compila o projeto",
+    "Começo verificando o ambiente",
+    `${LONG}Instale os dois.`.trim(),
+  ]);
 
-  // Nothing of the working text reached the conversation live, on any event but each call's step line (`said`, ADR
-  // 0121): the first sentence written before it.
+  // Nothing else of the working text reached the conversation live, on any event but each call's step line (`said`,
+  // ADR 0121): the first sentence written before it.
   const said = events.flatMap((e) => ("said" in e && e.said ? [e.said] : []));
   expect(said).toEqual(["Começo verificando o ambiente", "Go não está instalado"]);
   const live = JSON.stringify(events, (k, v) => (k === "said" ? undefined : v));
   expect(live).not.toContain("Vou tentar o compilador");
-  expect(live).not.toContain("Começo verificando");
   expect(live).not.toContain("Go não está instalado");
+  expect(live.split("Começo verificando").length - 1).toBe(1);
 
   // The answer too: only its message carries it; the last call said it writes.
   const before = JSON.stringify(events.filter((e) => e.type !== "message.created"));
@@ -101,7 +105,7 @@ test("a short answer shows whole in its message, with no tool call to wait for",
   expect(JSON.stringify(events.filter((e) => e !== reply))).not.toContain("certo");
 });
 
-test("a final call with no text closes with the last narration instead of an empty reply", async () => {
+test("a final call with no text adds nothing to the first line it said live, and the run is done", async () => {
   const env = envTool();
   f = await setup({
     toolSources: [env.source],
@@ -115,7 +119,7 @@ test("a final call with no text closes with the last narration instead of an emp
   });
   await drainOutbox(f.db, f.handlers);
   const timeline = await listMessages(f.db, f.owner.id, f.org.id, f.general.id);
-  expect(timeline.at(-1)?.body).toBe("Instalando e testando.");
+  expect(timeline.map((m) => m.body)).toEqual(["@dev prepara o ambiente", "Instalando e testando"]);
   const [run] = await f.db.select().from(schema.agentRuns);
   expect(run?.status).toBe("done");
 });

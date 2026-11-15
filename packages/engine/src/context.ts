@@ -1007,7 +1007,8 @@ export async function buildRunContext(
       };
 
   const capabilities = await options.capabilities;
-  // The right hand's own block (ADR 0137), in place of instructions: read live for the person behind the run.
+  const instructions = agent.instructions.trim() ? `# Your instructions\n${agent.instructions.trim()}` : "";
+  // The right hand's own block (ADR 0137), then its instructions: read live for the person behind the run.
   const rightHand =
     isRightHand(agent) && requester
       ? await rightHandPrompt(
@@ -1093,16 +1094,17 @@ export async function buildRunContext(
       cache: true,
     },
     {
-      text:
-        rightHand ??
-        [
-          `You are ${agent.name} (@${agent.handle})${agent.role ? `, ${agent.role}` : ""}, ${personal ? "one of this person's AI agents" : "an AI agent of this organization"}.`,
-          agent.instructions.trim() ? `# Your instructions\n${agent.instructions.trim()}` : "",
-          // The right hand with nobody behind the run (another agent's message) still keeps to its tools.
-          isRightHand(agent) ? rightHandTools(await seatState(db, run)) : "",
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
+      text: (rightHand
+        ? [rightHand, instructions]
+        : [
+            `You are ${agent.name} (@${agent.handle})${agent.role ? `, ${agent.role}` : ""}, ${personal ? "one of this person's AI agents" : "an AI agent of this organization"}.`,
+            instructions,
+            // The right hand with nobody behind the run (another agent's message) still keeps to its tools.
+            isRightHand(agent) ? rightHandTools(await seatState(db, run)) : "",
+          ]
+      )
+        .filter(Boolean)
+        .join("\n\n"),
     },
     ...(capabilities ? [{ text: capabilities }] : []),
     // Follows the requester (whose part of the team it names).
