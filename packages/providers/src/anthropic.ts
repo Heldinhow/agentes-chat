@@ -241,7 +241,7 @@ export function createAnthropicProvider(
           text: content.map((b) => (b.type === "text" ? b.text : "")).join(""),
           content,
           model: message.model,
-          stopReason: answer ? "end_turn" : mapStopReason(message.stop_reason),
+          stopReason: answer ? "end_turn" : stopReasonOf(message.stop_reason, content),
           usage: {
             inputTokens: message.usage.input_tokens,
             outputTokens: message.usage.output_tokens,
@@ -448,6 +448,13 @@ function fromContentBlock(block: BetaContentBlock, provider: string): ContentBlo
 /** A 400 about the thinking sent back (a signature it can't verify, a block out of place): worth a call without it. */
 const refusesThinking = (error: unknown) =>
   error instanceof Anthropic.BadRequestError && /thinking|signature/i.test(error.message);
+
+function stopReasonOf(reason: string | null, content: ContentBlock[]): StopReason {
+  const mapped = mapStopReason(reason);
+  return (mapped === "end_turn" || mapped === "other") && content.some((b) => b.type === "tool_use")
+    ? "tool_use"
+    : mapped;
+}
 
 function mapStopReason(reason: string | null): StopReason {
   if (reason === "end_turn" || reason === "max_tokens" || reason === "refusal" || reason === "tool_use") return reason;

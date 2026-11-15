@@ -17,6 +17,36 @@ const start = (input: number) => ({
 });
 
 describe("Anthropic adapter (scripted transport)", () => {
+  test("a reply with tool calls is a tool_use stop even when the endpoint says end_turn", async () => {
+    const { fetcher } = scripted(
+      sse([
+        start(10),
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Vou pedir." } },
+        { type: "content_block_stop", index: 0 },
+        {
+          type: "content_block_start",
+          index: 1,
+          content_block: { type: "tool_use", id: "toolu_9", name: "tell_agent", input: {} },
+        },
+        {
+          type: "content_block_delta",
+          index: 1,
+          delta: { type: "input_json_delta", partial_json: '{"agent":"@ayla"}' },
+        },
+        { type: "content_block_stop", index: 1 },
+        { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 5 } },
+        { type: "message_stop" },
+      ]),
+    );
+    const provider = createAnthropicProvider({ fetch: fetcher, maxRetries: 0 });
+    const result = await provider.stream(
+      { model: "claude-sonnet-5-5", system: "s", messages: [{ role: "user", content: "hi" }], maxTokens: 100 },
+      { apiKey: "k", onDelta: () => {} },
+    );
+    expect(result.stopReason).toBe("tool_use");
+  });
+
   test("maps tools, structured output, cache breakpoints, opaque replay; returns neutral blocks", async () => {
     const { fetcher, requests } = scripted(
       sse([
