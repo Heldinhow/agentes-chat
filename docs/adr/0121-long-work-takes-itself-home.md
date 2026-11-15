@@ -146,3 +146,9 @@ A reply turn passed a person's next step on to a work ("then post the summary in
 A work that asked other agents something and ended its turn reported home with the answers still out. Each answer then woke the agent where the ended run pointed: the anchor's thread. The result the person was waiting for (the files, the summary) landed under the anchor, after the report, where nobody looks once the work says it ended; in the conversation the agent later spoke of things the person had never seen.
 
 A notice for a run whose work ended and had its own thread (`deliverNoticeToRun`, `workHome` in `run-resume.ts`) is now written where the work reported: its channel and `home_thread_id`. The run it wakes is triggered there, so it answers in the conversation. While the work is on, a notice still lands in its thread; a work asked inside a thread keeps that thread, as before.
+
+## Addendum 2026-11-15: a run's first words before its tools reach the chat
+
+The step line held every word an agent wrote before its calls out of the chat ("Its words, never a message", above). On a model brain a person who asked something that takes a few calls saw only the step line, and lost it as soon as the answer came: "Vou ler o painel agora" read like a reply and vanished.
+
+A conversation run's short text before its first tools (under `WORKING_TEXT_MAX`, whole) is now posted once per run, as `work_in_background`'s `say` is, once one of those calls returned a result (`saidLive` on the transcript, `postedUpTo` so neither the closing line nor a pause posts it again). Never for a background run or work, a routine or other unattended run, a run that may pass, a batch with `pass` or `work_in_background`, a canceled run, or a call that waits on an approval or a question (its card speaks for it). Every later text before tools is still only the step line and narration in the steps. Computer brains are unchanged.

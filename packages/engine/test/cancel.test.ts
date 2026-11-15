@@ -214,7 +214,7 @@ describe("one active run per agent and conversation", () => {
     expect(events.find((e) => e.type === "agent.run.steered")).toMatchObject({ runId: runs[0]?.id });
     // The reply is in the main timeline, where it was asked; the message sent to it, in the thread.
     const main = await listMessages(f.db, f.owner.id, f.org.id, f.general.id);
-    expect(main.map((m) => m.body)).toEqual(["@dev compila o projeto", "Feito, na branch dev."]);
+    expect(main.map((m) => m.body)).toEqual(["@dev compila o projeto", "Compilando.", "Feito, na branch dev."]);
     const thread = await listMessages(f.db, f.owner.id, f.org.id, f.general.id, { threadId: question.id });
     expect(thread.map((m) => m.body)).toEqual(["@dev compila o projeto", "usa a branch dev, por favor"]);
   });
