@@ -313,6 +313,14 @@ test("the hand-offs block: where each colleague is, an answer's start until it w
   expect(progressing?.split("\n")[2]).toBe(
     '- @rita, since 16:58 (2 min ago): working on it. You handed it: "Rita vai ser apagada. Passa ao diogo a tua pasta e tudo o que sabes." Latest steps: 1 min ago: started tool web_search; 0 min ago: tool web_search finished. Posted 2 so far, latest 1 min ago: "Achei três vagas, falta ana revisar."',
   );
+  const onComputer = handOffsBlock(
+    [{ ...base, target: run("running"), progress: { steps: [], latest: null, computerTurn: true } }],
+    "Europe/Lisbon",
+    now,
+  );
+  expect(onComputer?.split("\n")[2]).toEndWith(
+    " It works in one long turn on its computer: the commands it runs there itself show only when that turn ends, so no new step doesn't mean it stopped or hasn't started.",
+  );
 });
 
 test("the hand-offs block: an open hand-off shows its run's latest steps and post, read without running it", async () => {
