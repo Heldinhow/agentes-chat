@@ -1,6 +1,6 @@
 import type { PubSub } from "@agenteschat/adapters";
 import { and, asc, type Database, desc, eq, gte, inArray, isNull, lt, schema, sql } from "@agenteschat/db";
-import { MODEL_TIERS, type ModelTier } from "@agenteschat/providers";
+import { isCustomModel, MODEL_TIERS, type ModelTier } from "@agenteschat/providers";
 import { getAgent } from "./agents";
 import { decidableBySql } from "./approvals";
 import { audienceSql, listsAllAgents } from "./audience";
@@ -142,12 +142,16 @@ export async function updateOrgSettings(
 ): Promise<OrgSettings> {
   await requirePermission(db, actorId, orgId, "configure");
   if (input.name !== undefined && input.name.trim() === "") throw new ValidationError("name can't be empty");
-  for (const model of [input.routerModel, input.summaryModel]) {
+  for (const [model, field] of [
+    [input.routerModel, "routerModel"],
+    [input.summaryModel, "summaryModel"],
+  ] as const) {
     if (!model) continue;
     const info = await modelInfoFor(db, model, orgId);
     if (!info) throw new ValidationError(`Unknown model ${model}`);
     // Routing and summaries answer through a JSON schema.
-    if (info.structuredOutput === false) throw new ValidationError(`${model} can't follow a JSON schema`);
+    if (info.structuredOutput === false && !(field === "routerModel" && isCustomModel(model)))
+      throw new ValidationError(`${model} can't follow a JSON schema`);
   }
   for (const [provider, tiers] of Object.entries(input.autoModels ?? {})) {
     for (const [tier, model] of Object.entries(tiers ?? {})) {

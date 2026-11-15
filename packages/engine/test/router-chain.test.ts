@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { type MachineReplies, type MachineRequest, type RealtimeEvent, ROUTE_PROTOCOL } from "@agenteschat/adapters";
 import { eq, schema } from "@agenteschat/db";
+import { customModelId } from "@agenteschat/providers";
 import {
   createAgent,
   createCredential,
@@ -15,6 +16,7 @@ import {
   postPersonMessage,
   receiptsFor,
   smallModelFor,
+  updateOrgSettings,
 } from "../src";
 import { addMember, type Fixture, setup } from "./fixtures";
 import { pairMachine } from "./machine-fixtures";
@@ -533,6 +535,32 @@ describe("Jev and the small model", () => {
       .set({ routerModel: "gpt-6-luna" })
       .where(eq(schema.organizationSettings.orgId, f.org.id));
     expect(await smallModelFor(f, f.org.id)).toBe("claude-haiku-5-5");
+  });
+
+  test("an endpoint-only workspace judges with the endpoint model it picked", async () => {
+    f = await setup();
+    await f.db.update(schema.providerCredentials).set({ revokedAt: new Date() });
+    const endpoint = await createCredential(
+      f.db,
+      f.keyWrapper,
+      f.owner.id,
+      f.org.id,
+      {
+        provider: "custom",
+        label: "Gateway",
+        apiKey: "gw-key-1234567",
+        endpoint: { style: "openai", baseURL: "https://gw.example.com/v1", models: [{ id: "m-1" }] },
+      },
+      { net: { allowPrivate: false, resolveHost: async () => ["93.184.216.34"] } },
+    );
+    expect(await smallModelFor(f, f.org.id)).toBeNull();
+    await updateOrgSettings(f.db, f.owner.id, f.org.id, { routerModel: customModelId(endpoint.id, "m-1") });
+    expect(await smallModelFor(f, f.org.id)).toBe(customModelId(endpoint.id, "m-1"));
+    await f.db
+      .update(schema.organizationSettings)
+      .set({ routerModel: customModelId(endpoint.id, "gone") })
+      .where(eq(schema.organizationSettings.orgId, f.org.id));
+    expect(await smallModelFor(f, f.org.id)).toBeNull();
   });
 
   test("Kimi alone: no model call, and the rules decide", async () => {

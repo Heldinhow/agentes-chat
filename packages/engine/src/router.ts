@@ -16,7 +16,9 @@ import {
 } from "@agenteschat/db";
 import {
   cheapModelOf,
+  customModelOf,
   ensureOpenRouterModels,
+  isCustomModel,
   isKnownModel,
   modelInfo,
   modelProvider,
@@ -30,6 +32,7 @@ import { summarizeGrants } from "./capabilities";
 import { quotedLine } from "./context";
 import { addAgentReaction, isValidReaction, normalizeReaction } from "./context/feedback";
 import { createAgentRuns, requesterOf } from "./dispatch";
+import { loadEndpointModels } from "./endpoints";
 import { type DecidedBy, MENTION_NEEDED } from "./events";
 import { cutText, hasQuestionMark, wordCount } from "./format";
 import type { ModelGateway } from "./gateway";
@@ -584,7 +587,12 @@ export async function smallModelFor(
     const keys = await orgKeyProviders(deps.db, orgId);
     if (keys.has("openrouter")) await ensureOpenRouterModels();
     // Its own model only while it can be priced: one OpenRouter no longer lists (or before its list) is passed over.
-    if (settings?.model && isKnownModel(settings.model) && (await reachable(settings.model))) return settings.model;
+    const priced = async (model: string) => {
+      if (!isCustomModel(model)) return isKnownModel(model);
+      await loadEndpointModels(deps.db, orgId);
+      return customModelOf(orgId, model) !== undefined;
+    };
+    if (settings?.model && (await priced(settings.model)) && (await reachable(settings.model))) return settings.model;
     for (const provider of new Set([await orgModelProvider(deps.db, orgId), ...SMALL_MODEL_ORDER])) {
       const model = pick(provider);
       if (keys.has(provider) && (await reachable(model))) return model;
