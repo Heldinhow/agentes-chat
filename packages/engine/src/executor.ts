@@ -562,7 +562,6 @@ export interface Transcript {
   postedCount: number;
   /** The words of the last message it posted (trimmed): saying exactly them again next adds nothing. */
   lastPosted?: string;
-  /** It already said its short text before tools live: later ones stay narration in its steps. */
   saidLive?: boolean;
   /**
    * A reply judged `untried` and held back (ADR 0109): nobody saw it. It goes out with the run's next words
@@ -4991,9 +4990,6 @@ async function executeRunInner(
         const waits: string[] = [];
         // What it wrote before these calls is the first one's step line (`takeStepWords`), posted only as below.
         if (!run.background) holdStepWords(run.id, isRightHand(agent) ? scrubSignIns(turnText, "••••").text : turnText);
-        // A short text before its first tools in a conversation goes out live, whole, once per run, as
-        // work_in_background's `say` does: once a call ran (a card's own words speak for an approval or a question,
-        // `pauseLead`). A longer text is a pause's lead, and background work has its post_update.
         const short = stripSentinel(turnText).trim();
         let liveSay =
           !run.background &&
@@ -5020,7 +5016,6 @@ async function executeRunInner(
             if (!repeatsLastPost(words)) {
               const said = await db.transaction((tx) => post(tx, replyThreadId, words));
               transcript.postedCount++;
-              // This turn's text is out: neither the closing line (`closingSummary`) nor a pause posts it again.
               transcript.postedUpTo = transcript.messages.length;
               const [view] = await withWikiLinks(db, run.orgId, [messageView(said)]);
               if (view) await publishMessageCreated(deps.pubsub, view);
