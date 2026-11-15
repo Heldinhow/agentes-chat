@@ -151,18 +151,18 @@ describe("a conversation run that reaches its step limit mid-work", () => {
     const run = await cappedRun();
     expect(f.provider.calls).toHaveLength(3);
     expect(run).toMatchObject({ status: "done", error: null, turns: 3 });
+    // Its first line before tools went live as it started; the line about the steps is its reply.
     const posted = await agentMessages(run.id);
-    expect(posted).toHaveLength(1);
-    expect(posted[0]?.body).toBe("I ran out of steps before finishing.");
-    expect(posted[0]?.meta).toMatchObject({ bodyCode: "step_limit", stepLimit: {} });
-    expect(run.replyMessageId).toBe(posted[0]?.id ?? "");
+    expect(posted.map((m) => m.body)).toEqual(["Olhando os PRs.", "I ran out of steps before finishing."]);
+    expect(posted[1]?.meta).toMatchObject({ bodyCode: "step_limit", stepLimit: {} });
+    expect(run.replyMessageId).toBe(posted[1]?.id ?? "");
   });
 
   test("Continuar replays its conversation with the same system and tools, then who asked to go on", async () => {
     const stopped = await cappedRun();
     const last = f.provider.calls.at(-1)?.request as ModelRequest;
     const { runId } = await continueRun(deps(), f.owner.id, f.org.id, stopped.id);
-    const [reply] = await agentMessages(stopped.id);
+    const reply = (await agentMessages(stopped.id)).find((m) => m.meta.stepLimit);
     expect(reply?.meta.stepLimit).toMatchObject({ continuedRunId: runId, continuedByUserId: f.owner.id });
     await expect(continueRun(deps(), f.owner.id, f.org.id, stopped.id)).rejects.toMatchObject({
       code: "run.not_continuable",

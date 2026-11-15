@@ -15,7 +15,7 @@ import { pairMachine } from "./machine-fixtures";
 
 /**
  * The waiting row's step line: what the agent wrote before a call is its next call's words (`agent.tool` `said`, or
- * `agent.step` for a computer brain's own call), one short line, and never a message.
+ * `agent.step` for a computer brain's own call), one short line; a model brain's first text before tools also goes live, whole (`saidLive`).
  */
 
 let f: Fixture;
@@ -33,7 +33,7 @@ type ToolEvent = Extract<ChannelEvent, { type: "agent.tool" }>;
 const toolStarts = (events: { type: string }[]) =>
   (events as ToolEvent[]).filter((e) => e.type === "agent.tool" && e.tool !== null);
 
-test("a model brain: what it wrote before its call is that call's step words, cut to one line, never posted", async () => {
+test("a model brain: what it wrote before its call is that call's step words, cut to one line; the text itself goes live once", async () => {
   const lastText = (req: ModelRequest) => JSON.stringify(req.messages.at(-1)?.content);
   f = await setup({
     contextTools: true,
@@ -51,7 +51,10 @@ test("a model brain: what it wrote before its call is that call's step words, cu
 
   const [start] = toolStarts(events);
   expect(start).toMatchObject({ tool: "search_context", said: "Vou ler o painel de tarefas do app" });
-  expect(await agentBodies()).toEqual(["Faltam o ícone e a classificação de conteúdo."]);
+  expect(await agentBodies()).toEqual([
+    "**Vou ler** o painel de tarefas do app. Depois respondo com o que falta.",
+    "Faltam o ícone e a classificação de conteúdo.",
+  ]);
 });
 
 const onComputer = async (brain: Brain) => {

@@ -503,14 +503,15 @@ describe("approval flow (end to end)", () => {
     expect(approval).toMatchObject({ title: "Merge PR #42 in acme/app", canDecide: true, threadId: null });
 
     // The chat shows the card, in the main timeline where it was asked: the line that only announces it stays out
-    // (`pauseLead`) and earlier narration is a step.
+    // (`pauseLead`); its first line before the call that ran went live.
     let main = await listMessages(f.db, f.owner.id, f.org.id, f.general.id);
     expect(main.map((m) => m.body)).toEqual([
       "@dev merge PR 42 if the tests pass",
+      "Let me look at the PR.",
       "Approval request: Merge PR #42 in acme/app",
     ]);
     // The card carries the agent's reason (ADR 0053 §8).
-    expect(main[1]?.meta).toEqual({
+    expect(main[2]?.meta).toEqual({
       approvalId: approval?.id,
       bodyCode: "approval_request",
       bodyParams: { title: "Merge PR #42 in acme/app" },
