@@ -157,7 +157,6 @@ test("a tool_call runs through the Tool Gateway and its result is fed back on th
   expect(seen[0]?.tools).toContain("check_env");
   expect(seen[1]?.messages.at(-1)).toEqual({ role: "user", content: "[tool result: go: not found]" });
   const timeline = await listMessages(f.db, f.owner.id, f.org.id, f.general.id);
-  // Its first line before the call went live once the call ran.
   expect(timeline.map((m) => m.body)).toEqual(["@dev tem Go aí?", "Vou verificar.", "Go não está instalado."]);
 
   const [run] = await f.db.select().from(schema.agentRuns);

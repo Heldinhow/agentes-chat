@@ -151,7 +151,6 @@ describe("a conversation run that reaches its step limit mid-work", () => {
     const run = await cappedRun();
     expect(f.provider.calls).toHaveLength(3);
     expect(run).toMatchObject({ status: "done", error: null, turns: 3 });
-    // Its first line before tools went live as it started; the line about the steps is its reply.
     const posted = await agentMessages(run.id);
     expect(posted.map((m) => m.body)).toEqual(["Olhando os PRs.", "I ran out of steps before finishing."]);
     expect(posted[1]?.meta).toMatchObject({ bodyCode: "step_limit", stepLimit: {} });
