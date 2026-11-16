@@ -1618,6 +1618,7 @@ export interface RunConsultation {
   createdAt: string;
   answeredAt: string | null;
   expiresAt: string;
+  fromElsewhere?: boolean;
 }
 
 /**

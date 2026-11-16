@@ -76,6 +76,10 @@ const Consultation = z.object({
   createdAt: z.string(),
   answeredAt: z.string().nullable(),
   expiresAt: z.string(),
+  fromElsewhere: z.boolean().optional().openapi({
+    description:
+      "Asked of this DM's agent from another conversation, for the person of this DM: its row stands where the request came in.",
+  }),
 });
 
 /** Channels and messages. Real-time updates arrive over the WebSocket (`/api/ws`). */

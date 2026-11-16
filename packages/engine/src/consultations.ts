@@ -22,11 +22,12 @@ import { type AiStatusDeps, agentAiState } from "./ai-status";
 import { canTalkTo, speakerFor, viaAgent } from "./audience";
 import { runAuthorityById } from "./authority";
 import { routineBriefOfRun } from "./background";
+import { runBrainOf } from "./brains/select";
 import { type BrakeOutcome, brakeWakes, callableAgents, LATER_JOB, notCallableText } from "./brakes";
 import { canceledBy, stopRun } from "./cancel";
 import { publishDelivery } from "./delivery";
 import { INBOX_JOB, startOrJoinRun } from "./dispatch";
-import { isAgentOnlyDm, openAgentDm } from "./dms";
+import { isAgentOnlyDm, openAgentDm, personAgentDmKey } from "./dms";
 import { publishChannelEvent } from "./events";
 import { cutText } from "./format";
 import type { Judge } from "./judge";
@@ -36,7 +37,6 @@ import type { Notice } from "./notices";
 import { notifyAgentUnreached } from "./notification-producers";
 import { runReadOutsideById } from "./outside";
 import { actingRoutineOfCall, personBehindCall, routineCreatorOf } from "./requester";
-import { runBrainOf } from "./brains/select";
 import { isRightHand } from "./right-hand";
 import { isRoutineRoomKey } from "./routine-brief";
 import { stoppedToSend } from "./run-inbox";
@@ -269,6 +269,10 @@ export function createAskAgentToolSource(
         agentId: ctx.agentId,
         consultedAgentId: target.id,
       });
+      await announceInConsultedDm(
+        { db, pubsub: deps.pubsub },
+        { orgId: ctx.orgId, id: created.id, askerRunId: ctx.runId, targetAgentId: target.id },
+      );
       return {
         content: between
           ? `Asked @${handle}. Your answer goes back once @${handle} has answered, together with it: do your own part now, then end your turn saying what you asked.`
@@ -420,6 +424,10 @@ function createTellAgentTool(deps: { pubsub?: PubSub; ai?: AiCheck; judge?: Judg
         consultedAgentId: target.id,
         kind: "note",
       });
+      await announceInConsultedDm(
+        { db, pubsub: deps.pubsub },
+        { orgId: ctx.orgId, id: sent.consultationId, askerRunId: ctx.runId, targetAgentId: target.id },
+      );
       const handed = ctx.background
         ? `Handed to @${handle}. What comes of it reaches the people where this routine reports, by itself, and wakes you there: don't wait for it. Do your own part now, and say in hand_off who has what.`
         : headsUp
@@ -1151,6 +1159,7 @@ async function closeConsultation(
     status,
     ...(closed.kind === "note" ? { kind: "note" as const } : {}),
   });
+  await announceInConsultedDm(deps, closed);
   return closed;
 }
 
@@ -1659,6 +1668,7 @@ export interface RunConsultation {
   createdAt: Date;
   answeredAt: Date | null;
   expiresAt: Date;
+  fromElsewhere?: true;
 }
 
 /**
@@ -1671,28 +1681,86 @@ const LIST_LIMIT = 50;
  * The questions agents asked from this conversation, latest first, at most `LIST_LIMIT`: the app draws them inside
  * the reply of the run that asked, each with its state, and folds the `consult_reply` notices of the ones it shows.
  */
-export async function consultationsIn(db: Executor, orgId: string, channelId: string): Promise<RunConsultation[]> {
+const listFields = {
+  id: agentConsultations.id,
+  kind: agentConsultations.kind,
+  runId: agentConsultations.askerRunId,
+  agentId: agentConsultations.askerAgentId,
+  consultedAgentId: agentConsultations.targetAgentId,
+  targetRunId: agentConsultations.targetRunId,
+  status: agentConsultations.status,
+  question: agentConsultations.question,
+  answer: agentConsultations.answer,
+  createdAt: agentConsultations.createdAt,
+  answeredAt: agentConsultations.answeredAt,
+  expiresAt: agentConsultations.expiresAt,
+  dmId: agentConsultations.channelId,
+};
+
+export async function personDmOf(
+  db: Executor,
+  orgId: string,
+  channelId: string,
+): Promise<{ personId: string; agentId: string } | null> {
+  const [channel] = await db
+    .select({ kind: channels.kind, dmKey: channels.dmKey })
+    .from(channels)
+    .where(and(eq(channels.orgId, orgId), eq(channels.id, channelId)));
+  if (channel?.kind !== "dm" || !channel.dmKey) return null;
+  const parts = channel.dmKey.split("|");
+  const people = parts.flatMap((p) => (p.startsWith("u:") ? [p.slice(2)] : []));
+  const bots = parts.flatMap((p) => (p.startsWith("a:") ? [p.slice(2)] : []));
+  const [personId] = people;
+  const [agentId] = bots;
+  return parts.length === 2 && personId && agentId ? { personId, agentId } : null;
+}
+
+async function askedFor(db: Executor, orgId: string, runIds: readonly string[], personId: string) {
+  const out = new Set<string>();
+  for (const runId of new Set(runIds))
+    if ((await runAuthorityById(db, orgId, runId)).personId === personId) out.add(runId);
+  return out;
+}
+
+async function askedOfThisDm(db: Executor, orgId: string, channelId: string) {
+  const dm = await personDmOf(db, orgId, channelId);
+  if (!dm) return [];
   const rows = await db
-    .select({
-      id: agentConsultations.id,
-      kind: agentConsultations.kind,
-      runId: agentConsultations.askerRunId,
-      agentId: agentConsultations.askerAgentId,
-      consultedAgentId: agentConsultations.targetAgentId,
-      targetRunId: agentConsultations.targetRunId,
-      status: agentConsultations.status,
-      question: agentConsultations.question,
-      answer: agentConsultations.answer,
-      createdAt: agentConsultations.createdAt,
-      answeredAt: agentConsultations.answeredAt,
-      expiresAt: agentConsultations.expiresAt,
-      dmId: agentConsultations.channelId,
-    })
+    .select(listFields)
+    .from(agentConsultations)
+    .innerJoin(agentRuns, eq(agentRuns.id, agentConsultations.askerRunId))
+    .where(
+      and(
+        eq(agentConsultations.orgId, orgId),
+        eq(agentConsultations.targetAgentId, dm.agentId),
+        eq(agentRuns.orgId, orgId),
+        ne(agentRuns.channelId, channelId),
+      ),
+    )
+    .orderBy(desc(agentConsultations.createdAt))
+    .limit(LIST_LIMIT);
+  const mine = await askedFor(
+    db,
+    orgId,
+    rows.map((r) => r.runId),
+    dm.personId,
+  );
+  return rows.filter((r) => mine.has(r.runId));
+}
+
+export async function consultationsIn(db: Executor, orgId: string, channelId: string): Promise<RunConsultation[]> {
+  const here = await db
+    .select(listFields)
     .from(agentConsultations)
     .innerJoin(agentRuns, eq(agentRuns.id, agentConsultations.askerRunId))
     .where(and(eq(agentConsultations.orgId, orgId), eq(agentRuns.orgId, orgId), eq(agentRuns.channelId, channelId)))
     .orderBy(desc(agentConsultations.createdAt))
     .limit(LIST_LIMIT);
+  const elsewhere = await askedOfThisDm(db, orgId, channelId);
+  const fromElsewhere = new Set(elsewhere.map((r) => r.id));
+  const rows = [...here, ...elsewhere.filter((r) => !here.some((h) => h.id === r.id))].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+  );
   // Where the consulted runs of the open ones are: held on a person, on their computer, on what they handed on.
   const held = rows.flatMap((r) => (r.status === "open" && r.targetRunId ? [r.targetRunId] : []));
   const targets = held.length
@@ -1730,6 +1798,7 @@ export async function consultationsIn(db: Executor, orgId: string, channelId: st
     return {
       ...consultationView(r, waitOf, kept),
       progress: r.status === "open" && r.targetRunId && !kept ? (progressOf.get(r.targetRunId) ?? null) : null,
+      ...(fromElsewhere.has(r.id) ? { fromElsewhere: true as const } : {}),
     };
   });
 }
@@ -1823,6 +1892,66 @@ export interface ConsultationConversation {
  * may be for other people, in conversations this one can't read). Null when the question wasn't asked from here.
  */
 export async function consultationConversation(
+  db: Database,
+  orgId: string,
+  channelId: string,
+  consultationId: string,
+): Promise<ConsultationConversation | null> {
+  const here = await conversationAskedIn(db, orgId, channelId, consultationId);
+  if (here) return here;
+  const from = await askedFromFor(db, orgId, channelId, consultationId);
+  const there = from ? await conversationAskedIn(db, orgId, from, consultationId) : null;
+  return there && { ...there, consultation: { ...there.consultation, fromElsewhere: true } };
+}
+
+async function askedFromFor(db: Executor, orgId: string, channelId: string, consultationId: string) {
+  const dm = await personDmOf(db, orgId, channelId);
+  if (!dm) return null;
+  const [row] = await db
+    .select({ runId: agentConsultations.askerRunId, channelId: agentRuns.channelId })
+    .from(agentConsultations)
+    .innerJoin(agentRuns, eq(agentRuns.id, agentConsultations.askerRunId))
+    .where(
+      and(
+        eq(agentConsultations.orgId, orgId),
+        eq(agentConsultations.id, consultationId),
+        eq(agentConsultations.targetAgentId, dm.agentId),
+        eq(agentRuns.orgId, orgId),
+        ne(agentRuns.channelId, channelId),
+      ),
+    );
+  if (!row) return null;
+  return (await askedFor(db, orgId, [row.runId], dm.personId)).has(row.runId) ? row.channelId : null;
+}
+
+export async function announceInConsultedDm(
+  deps: { db: Executor; pubsub?: PubSub },
+  c: { orgId: string; id: string; askerRunId: string; targetAgentId: string },
+) {
+  if (!deps.pubsub) return;
+  try {
+    const { personId } = await runAuthorityById(deps.db, c.orgId, c.askerRunId);
+    if (!personId) return;
+    const [dm] = await deps.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(and(eq(channels.orgId, c.orgId), eq(channels.dmKey, personAgentDmKey(personId, c.targetAgentId))));
+    const [asker] = await deps.db
+      .select({ channelId: agentRuns.channelId })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.orgId, c.orgId), eq(agentRuns.id, c.askerRunId)));
+    if (!dm || dm.id === asker?.channelId) return;
+    await publishChannelEvent(deps.pubsub, {
+      type: "agent.consultation",
+      channelId: dm.id,
+      threadId: null,
+      runId: c.askerRunId,
+      consultationId: c.id,
+    });
+  } catch {}
+}
+
+async function conversationAskedIn(
   db: Database,
   orgId: string,
   channelId: string,
@@ -1982,6 +2111,7 @@ export async function announceConsultationChange(
     .select({
       id: agentConsultations.id,
       runId: agentConsultations.askerRunId,
+      targetAgentId: agentConsultations.targetAgentId,
       channelId: agentRuns.channelId,
       threadRootId: agentRuns.threadRootId,
       triggerMessageId: agentRuns.triggerMessageId,
@@ -2003,6 +2133,12 @@ export async function announceConsultationChange(
       runId: r.runId,
       consultationId: r.id,
     }).catch(() => {});
+    await announceInConsultedDm(deps, {
+      orgId: run.orgId,
+      id: r.id,
+      askerRunId: r.runId,
+      targetAgentId: r.targetAgentId,
+    });
   }
 }
 

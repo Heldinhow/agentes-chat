@@ -3,7 +3,7 @@ import { and, type Database, desc, eq, gt, inArray, isNull, schema, sql } from "
 import { type AiStatusDeps, agentAiState } from "./ai-status";
 import { canTalkTo, speakerFor, viaAgent } from "./audience";
 import { fedByRoutine, personOfMessage, routinePostRun, runAuthorityById } from "./authority";
-import { chainOfRun, NOTE_DEDUPE_MS, sendNote } from "./consultations";
+import { announceInConsultedDm, chainOfRun, NOTE_DEDUPE_MS, sendNote } from "./consultations";
 import { publishChannelEvent, publishMessageCreated } from "./events";
 import { getMessage, type Message, messageView } from "./messages";
 import { notifyAgentUnreached } from "./notification-producers";
@@ -218,6 +218,10 @@ export async function settleReach(
           consultedAgentId: a.id,
           kind: "note",
         });
+        await announceInConsultedDm(
+          { db, pubsub: deps.pubsub },
+          { orgId: message.orgId, id: sent.consultationId, askerRunId: runId, targetAgentId: a.id },
+        );
       }
     }
   }
