@@ -381,6 +381,9 @@ p {
   min-width: 0;
   container-type: inline-size;
 }
+.consult-pair--start {
+  grid-template-columns: 16px minmax(0, auto) minmax(16px, 1fr);
+}
 .consult-pair::before,
 .consult-pair::after {
   content: "";
@@ -487,11 +490,6 @@ html:not([data-pointer]) .consult-pair__row:focus-visible {
   height: 15px;
   margin-inline: 6px;
   vertical-align: calc(var(--cap-top) - var(--cap-mid) - 7.5px);
-}
-.consult-pair__asked {
-  flex: none;
-  margin-inline: 6px;
-  color: var(--muted);
 }
 /* Cut out of what is under them: the open row's blue too (the page's ring drew gray circles on it in dark). */
 .consult-pair__faces > .ac-avatar {

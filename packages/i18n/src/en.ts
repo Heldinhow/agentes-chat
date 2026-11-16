@@ -17495,7 +17495,6 @@ export const en = {
       someAnswered: "{{done}} of {{total}} answered",
       /** Its tip when several were asked: "Theo's talks with Atlas, Rio and Iris". */
       labelMany: "{{from}}'s talks with {{to}}",
-      asked: "asked",
     },
     /** A question opened in the panel over the conversation ("Theo ⇄ Iris"): what the two agents said, read only. */
     consultPanel: {

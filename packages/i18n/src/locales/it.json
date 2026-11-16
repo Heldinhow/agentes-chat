@@ -10715,10 +10715,10 @@
       "copiesRemoved_one": "{{count}} accesso inutilizzato rimosso.",
       "copiesRemoved_many": "{{count}} accessi inutilizzati rimossi.",
       "copiesRemoved_other": "{{count}} accessi inutilizzati rimossi.",
-      "removeAllGrok": "Rimuovi tutti gli accessi a Grok",
-      "removeAllTitle": "Rimuovere tutti i {{n}} accessi a Grok?",
-      "removeAllText": "Smettono di pensare per i loro agenti su {{computers}}. Gli accessi di altre persone non vengono toccati.",
       "removeAllDone": "{{n}} accessi a Grok rimossi.",
+      "removeAllText": "Smettono di pensare per i loro agenti su {{computers}}. Gli accessi di altre persone non vengono toccati.",
+      "removeAllTitle": "Rimuovere tutti i {{n}} accessi a Grok?",
+      "removeAllGrok": "Rimuovi tutti gli accessi a Grok",
       "disconnect": "Scollega",
       "renameTitle": "Rinomina {{label}}",
       "nameLabel": "Nome",
@@ -17710,8 +17710,7 @@
       "noAnswer": "non ha risposto",
       "notFinished": "non ha finito",
       "someAnswered": "{{done}} su {{total}} hanno risposto",
-      "labelMany": "Conversazioni di {{from}} con {{to}}",
-      "asked": "ha chiesto a"
+      "labelMany": "Conversazioni di {{from}} con {{to}}"
     },
     "consultPanel": {
       "label": "Conversazione tra {{from}} e {{to}}",

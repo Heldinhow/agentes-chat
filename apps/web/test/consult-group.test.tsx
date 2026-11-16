@@ -691,7 +691,9 @@ describe("asked of this DM's agent from another conversation", () => {
     await push(socket, { type: "agent.consultation", runId: "r-else", consultationId: "q-else" });
     await settle(5);
     const r = row() as HTMLElement;
-    expect(r.querySelector(".consult-pair__asked")?.textContent).toBe("pediu ao");
+    expect(r.querySelector(".consult-pair__swap")).not.toBeNull();
+    expect(r.querySelector(".consult-pair__subject")?.textContent).toBe("·Como está a curva de juros hoje?");
+    expect(r.classList.contains("consult-pair--start")).toBe(true);
     expect(r.textContent).toContain("Ada");
     expect(r.textContent).toContain("Atlas");
     expect(r.querySelector(".consult-pair__row--live")).not.toBeNull();

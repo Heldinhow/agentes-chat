@@ -181,11 +181,11 @@ export function useConsultById(channelId: string, id: string | undefined): RunCo
 export function ConsultPairRow({
   askerId,
   items,
-  asked = false,
+  start = false,
 }: {
   askerId: string;
   items: readonly ConsultPairItem[];
-  asked?: boolean;
+  start?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const { org } = useOrg();
@@ -219,7 +219,7 @@ export function ConsultPairRow({
       ? t("chat.consultPanel.label", { from, to: names[0] })
       : t("chat.consultPair.labelMany", { from, to: joinNames(names, t) });
   return (
-    <div className="consult-pair">
+    <div className={cx("consult-pair", start && "consult-pair--start")}>
       <Tip button look="ac-msg__tip tm-tip" tip={rowTip(title, question ? [question] : [])}>
         <button
           type="button"
@@ -242,10 +242,6 @@ export function ConsultPairRow({
             {pair.tone === "you" ? (
               <span className="consult-pair__swap consult-pair__wait">
                 <WaitMark />
-              </span>
-            ) : asked ? (
-              <span className="consult-pair__asked">
-                {t("chat.consultPair.asked", { context: agentGrammar(names[0] ?? "").context })}
               </span>
             ) : (
               <Icon name="swap" size={16} className="consult-pair__swap" label={t("newAgent.and")} />
@@ -389,7 +385,7 @@ export function ConsultHelpingTag({ consultation: c }: { consultation: RunConsul
 export function AskedElsewhereRow({ consultation }: { consultation: RunConsultation }) {
   return (
     <div data-consultation-id={consultation.id}>
-      <ConsultPairRow askerId={consultation.agentId} items={[consultation]} asked />
+      <ConsultPairRow askerId={consultation.agentId} items={[consultation]} start />
     </div>
   );
 }

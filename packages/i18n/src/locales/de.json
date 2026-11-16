@@ -10309,10 +10309,10 @@
       "removeCopies": "Entfernen",
       "copiesRemoved_one": "{{count}} ungenutzte Anmeldung entfernt.",
       "copiesRemoved_other": "{{count}} ungenutzte Anmeldungen entfernt.",
-      "removeAllGrok": "Alle Grok-Anmeldungen entfernen",
-      "removeAllTitle": "Alle {{n}} Grok-Anmeldungen entfernen?",
-      "removeAllText": "Sie denken dann für ihre Agenten auf {{computers}} nicht mehr mit. Anmeldungen anderer Personen bleiben unangetastet.",
       "removeAllDone": "{{n}} Grok-Anmeldungen entfernt.",
+      "removeAllText": "Sie denken dann für ihre Agenten auf {{computers}} nicht mehr mit. Anmeldungen anderer Personen bleiben unangetastet.",
+      "removeAllTitle": "Alle {{n}} Grok-Anmeldungen entfernen?",
+      "removeAllGrok": "Alle Grok-Anmeldungen entfernen",
       "disconnect": "Trennen",
       "renameTitle": "{{label}} umbenennen",
       "nameLabel": "Name",
@@ -17159,8 +17159,7 @@
       "noAnswer": "hat nicht geantwortet",
       "notFinished": "nicht fertig geworden",
       "someAnswered": "{{done}} von {{total}} haben geantwortet",
-      "labelMany": "Gespräche von {{from}} mit {{to}}",
-      "asked": "fragte"
+      "labelMany": "Gespräche von {{from}} mit {{to}}"
     },
     "consultPanel": {
       "label": "Unterhaltung zwischen {{from}} und {{to}}",

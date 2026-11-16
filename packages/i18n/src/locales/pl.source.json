@@ -42241,9 +42241,6 @@
   "chat.consultPair.labelMany": {
     "value": "{{from}}'s talks with {{to}}"
   },
-  "chat.consultPair.asked": {
-    "value": "asked"
-  },
   "chat.consultPanel.label": {
     "value": "Conversation between {{from}} and {{to}}"
   },

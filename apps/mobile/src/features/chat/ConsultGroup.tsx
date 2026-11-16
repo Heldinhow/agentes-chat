@@ -20,7 +20,7 @@ import {
 } from "@agenteschat/client/lib/consult-group";
 import { consultSubject, consultTimeText, withoutRelayLine } from "@agenteschat/client/lib/consultations";
 import { namesText } from "@agenteschat/client/lib/format";
-import { agentGrammar } from "@agenteschat/client/lib/grammar";
+import type { agentGrammar } from "@agenteschat/client/lib/grammar";
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import { useEffect, useMemo, useState } from "react";
@@ -125,7 +125,6 @@ export function ConsultPairRow({
   items,
   inline = false,
   gap,
-  asked = false,
 }: {
   askerId: string;
   /** The conversation that asked: the screen opens from it. */
@@ -135,7 +134,6 @@ export function ConsultPairRow({
   inline?: boolean;
   /** Under what shows above it (a turn's, or a part's under another quiet line). Inline: its margin above. */
   gap?: number;
-  asked?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const rhythm = useRhythm();
@@ -202,10 +200,6 @@ export function ConsultPairRow({
           <View style={styles.mark}>
             <WaitMark size={8} />
           </View>
-        ) : asked ? (
-          <Text variant="footnote" tone="faint">
-            {t("chat.consultPair.asked", { context: agentGrammar(names[0] ?? "").context })}
-          </Text>
         ) : (
           <Icon name="swap" size={13} color={pair.tone === "live" ? c.agent : c.faint} />
         )}

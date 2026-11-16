@@ -1974,12 +1974,7 @@ function Chat({
         }
         case "asked":
           return (
-            <ConsultPairRow
-              askerId={item.consultation.agentId}
-              channelId={channelId}
-              items={[item.consultation]}
-              asked
-            />
+            <ConsultPairRow askerId={item.consultation.agentId} channelId={channelId} items={[item.consultation]} />
           );
         case "image":
           return (
