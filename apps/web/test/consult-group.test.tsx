@@ -662,3 +662,48 @@ describe("whose card waits on you (ADR 0095 addendum)", () => {
     expect(askOf([other], ATLAS_ID)?.ask.id).toBe("a-other");
   });
 });
+
+describe("asked of this DM's agent from another conversation", () => {
+  test("the row comes in with the request, before the consulted run starts, and follows it to its answer", async () => {
+    const state = seedState();
+    state.messages.push({
+      id: "msg-before",
+      channelId: ENG_ID,
+      threadId: null,
+      author: { type: "person", id: "u-joao" },
+      body: "Bom dia.",
+      mentionedAgentIds: [],
+      agentRunId: null,
+      createdAt: ago(120),
+    });
+    state.consultations = { [ENG_ID]: [] };
+    const { socket } = await open(state);
+    expect(row()).toBeNull();
+
+    const out = consultation({
+      id: "q-else",
+      runId: "r-else",
+      consultedRunId: null,
+      createdAt: ago(2),
+      fromElsewhere: true,
+    });
+    state.consultations = { [ENG_ID]: [out] };
+    await push(socket, { type: "agent.consultation", runId: "r-else", consultationId: "q-else" });
+    await settle(5);
+    const r = row() as HTMLElement;
+    expect(r.querySelector(".consult-pair__asked")?.textContent).toBe("pediu ao");
+    expect(r.textContent).toContain("Ada");
+    expect(r.textContent).toContain("Atlas");
+    expect(r.querySelector(".consult-pair__row--live")).not.toBeNull();
+    expect(r.closest("[data-consultation-id]")?.getAttribute("data-consultation-id")).toBe("q-else");
+
+    state.consultations = {
+      [ENG_ID]: [{ ...out, consultedRunId: "atlas-run", status: "answered", answer: ANSWER, answeredAt: ago(1) }],
+    };
+    await push(socket, { type: "agent.consultation", runId: "r-else", consultationId: "q-else" });
+    await settle(5);
+    expect(row()?.querySelector(".consult-pair__row--live")).toBeNull();
+    expect(row()?.querySelector(".consult-pair__time")?.textContent).toMatch(/^levou \d+ s$/);
+    expect(row()?.textContent).not.toContain("subiu 6 pb");
+  });
+});
