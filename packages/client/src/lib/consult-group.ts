@@ -569,3 +569,30 @@ export function consultLineTarget(
 ): string {
   return firstOfRun(messages, fold.consultation.runId) ?? fold.messageId;
 }
+
+export const askedHere = (list: readonly RunConsultation[]) => list.filter((c) => !c.fromElsewhere);
+
+export function askedElsewhere(list: readonly RunConsultation[]): RunConsultation[] {
+  return list
+    .filter((c) => c.fromElsewhere)
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id));
+}
+
+export function placeAskedElsewhere(
+  anchors: readonly { key: string; at: string | null }[],
+  consults: readonly RunConsultation[],
+): { before: Map<string, RunConsultation[]>; after: RunConsultation[] } {
+  const pending = askedElsewhere(consults);
+  const before = new Map<string, RunConsultation[]>();
+  let next = 0;
+  for (const anchor of anchors) {
+    if (next >= pending.length) break;
+    if (anchor.at === null) continue;
+    const at = Date.parse(anchor.at);
+    const placed: RunConsultation[] = [];
+    while (next < pending.length && Date.parse(pending[next]?.createdAt ?? "") < at)
+      placed.push(pending[next++] as RunConsultation);
+    if (placed.length > 0) before.set(anchor.key, placed);
+  }
+  return { before, after: pending.slice(next) };
+}

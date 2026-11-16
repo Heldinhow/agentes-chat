@@ -115,7 +115,7 @@ import {
 import { firstUnreadId, opensAtLastRead, unreadThreadRootId } from "@agenteschat/client/lib/chat-look";
 import { choiceReplyLine } from "@agenteschat/client/lib/choices";
 import { draftKeyOf } from "@agenteschat/client/lib/composer-drafts";
-import { type ConsultPairItem, consultsForLine } from "@agenteschat/client/lib/consult-group";
+import { type ConsultPairItem, consultsForLine, placeAskedElsewhere } from "@agenteschat/client/lib/consult-group";
 import { consultationsOf } from "@agenteschat/client/lib/consultations";
 import { deviceWaitOf } from "@agenteschat/client/lib/devices";
 import { clearDraft, peekDraft } from "@agenteschat/client/lib/drafts";
@@ -299,6 +299,7 @@ import {
 import { QueueWaitTurns, useAgentsMachineId } from "@/components/ComputerQueue";
 import { ConsultationDialog } from "@/components/ConsultationDialog";
 import {
+  AskedElsewhereRow,
   ConsultAnswerLine,
   type ConsultGroups,
   ConsultGroupsProvider,
@@ -1405,7 +1406,7 @@ function ChannelView({
   // notices draw, and which ones the working line leaves to a reply near the end (a run at work draws none yet).
   const consultRows = useMemo(() => timeline.flatMap((i) => (i.kind === "message" ? [i.message] : [])), [timeline]);
   const liveRuns = useMemo(() => new Set(slots.map((slot) => slot.runId)), [slots]);
-  const consultGroups = useConsultGroups(channel.id, consultRows, liveRuns, consultId);
+  const consultGroups = useConsultGroups(channel.id, consultRows, liveRuns, consultId, !thread);
 
   // Newest at the bottom: follow new messages and streaming text while the person is at the
   // bottom; if they scrolled up, the round button at the top right leads back instead of jumping.
@@ -3285,6 +3286,20 @@ const Timeline = memo(function Timeline({
   const shownMessages = useMemo(() => items.flatMap((i) => (i.kind === "message" ? [i.message] : [])), [items]);
   // One stop, one pill: a stopped task's notice goes into its reply's pill while that reply (or its block) is here.
   const stops = useMemo(() => stopsOf(shownMessages, slots), [shownMessages, slots]);
+  const elsewhere = useMemo(
+    () =>
+      placeAskedElsewhere(
+        items.flatMap((i) =>
+          i.kind === "day"
+            ? [{ key: i.key, at: new Date(new Date(i.iso).setHours(0, 0, 0, 0)).toISOString() }]
+            : i.kind === "message"
+              ? [{ key: i.key, at: i.message.createdAt }]
+              : [],
+        ),
+        consultGroups.elsewhere,
+      ),
+    [items, consultGroups.elsewhere],
+  );
   const rows: ReactElement<{ message?: MessageType }>[] = [];
   const afterUnshown = () => unshown.has(rows.at(-1)?.key ?? "");
   const blockRow = (slot: RunSlot) => {
@@ -3300,6 +3315,8 @@ const Timeline = memo(function Timeline({
     );
   };
   for (const [at, item] of items.entries()) {
+    for (const c of elsewhere.before.get(item.key) ?? [])
+      rows.push(<AskedElsewhereRow key={`asked-${c.id}`} consultation={c} />);
     const grouped = item.kind === "message" && item.grouped && !afterUnshown();
     const after = items[at + 1];
     // Where it sits in its author's run: my own rows' bubbles square the corners they share.
@@ -3361,6 +3378,7 @@ const Timeline = memo(function Timeline({
       ),
     );
   }
+  for (const c of elsewhere.after) rows.push(<AskedElsewhereRow key={`asked-${c.id}`} consultation={c} />);
   rows.push(<QueueWaitTurns key="queue-waits" channelId={channelId} messages={shownMessages} />);
   for (const slot of drawn) rows.push(blockRow(slot));
   for (const place of held) rows.push(<HeldBrowserRow key={`held-${place.runId}`} place={place} />);

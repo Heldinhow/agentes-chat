@@ -8,6 +8,8 @@ import {
 } from "@agenteschat/client";
 import {
   asExchanges,
+  askedElsewhere,
+  askedHere,
   type ConsultLineState,
   type ConsultNoticeFold,
   type ConsultPairItem,
@@ -55,6 +57,7 @@ export interface ConsultGroups {
   open: string | null;
   /** By the consulted agent's run: the question it answers, so its cards here say whom it helps. */
   helping: ReadonlyMap<string, RunConsultation>;
+  elsewhere: readonly RunConsultation[];
 }
 
 const EMPTY: ConsultGroups = {
@@ -65,6 +68,7 @@ const EMPTY: ConsultGroups = {
   live: new Set(),
   open: null,
   helping: new Map(),
+  elsewhere: [],
 };
 const ConsultGroupsContext = createContext<ConsultGroups>(EMPTY);
 export const ConsultGroupsProvider = ConsultGroupsContext.Provider;
@@ -85,6 +89,7 @@ export function useConsultGroups(
   rows: readonly ConsultRow[],
   live: ReadonlySet<string>,
   open: string | null = null,
+  withElsewhere = true,
 ): ConsultGroups {
   const { org } = useOrg();
   const qc = useQueryClient();
@@ -102,9 +107,11 @@ export function useConsultGroups(
     return out;
   }, [list.data]);
   return useMemo(() => {
-    const all = asExchanges(list.data ?? []);
+    const all = asExchanges(askedHere(list.data ?? []));
+    const elsewhere = withElsewhere ? askedElsewhere(list.data ?? []) : EMPTY.elsewhere;
     // A reply's `meta.consulted` row still shows pressed while its question is open beside the conversation.
-    if (all.length === 0) return open === null && live.size === 0 ? EMPTY : { ...EMPTY, live, open };
+    if (all.length === 0)
+      return open === null && live.size === 0 && elsewhere.length === 0 ? EMPTY : { ...EMPTY, live, open, elsewhere };
     return {
       byRun: groupsByRun(all),
       listed: new Set(all.map((c) => c.id)),
@@ -113,8 +120,9 @@ export function useConsultGroups(
       live,
       open,
       helping,
+      elsewhere,
     };
-  }, [list.data, rows, live, open, helping]);
+  }, [list.data, rows, live, open, helping, withElsewhere]);
 }
 
 /** A question's state in words, in the dialog and in place ("A Iris espera uma aprovação"). */
@@ -170,7 +178,15 @@ export function useConsultById(channelId: string, id: string | undefined): RunCo
  * same row stands for an answer whose reply is farther up or not here, and for a hand-off by direct message on a
  * reach line.
  */
-export function ConsultPairRow({ askerId, items }: { askerId: string; items: readonly ConsultPairItem[] }) {
+export function ConsultPairRow({
+  askerId,
+  items,
+  asked = false,
+}: {
+  askerId: string;
+  items: readonly ConsultPairItem[];
+  asked?: boolean;
+}) {
   const { t, i18n } = useTranslation();
   const { org } = useOrg();
   const dir = useDirectory(org.id);
@@ -226,6 +242,10 @@ export function ConsultPairRow({ askerId, items }: { askerId: string; items: rea
             {pair.tone === "you" ? (
               <span className="consult-pair__swap consult-pair__wait">
                 <WaitMark />
+              </span>
+            ) : asked ? (
+              <span className="consult-pair__asked">
+                {t("chat.consultPair.asked", { context: agentGrammar(names[0] ?? "").context })}
               </span>
             ) : (
               <Icon name="swap" size={16} className="consult-pair__swap" label={t("newAgent.and")} />
@@ -363,5 +383,13 @@ export function ConsultHelpingTag({ consultation: c }: { consultation: RunConsul
         </>
       )}
     </span>
+  );
+}
+
+export function AskedElsewhereRow({ consultation }: { consultation: RunConsultation }) {
+  return (
+    <div data-consultation-id={consultation.id}>
+      <ConsultPairRow askerId={consultation.agentId} items={[consultation]} asked />
+    </div>
   );
 }

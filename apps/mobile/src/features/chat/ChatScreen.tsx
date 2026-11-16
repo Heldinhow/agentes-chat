@@ -52,9 +52,11 @@ import { CHAT_RHYTHM, firstUnreadId, opensAtLastRead, unreadThreadRootId } from 
 import { type ConversationWait, conversationWaits } from "@agenteschat/client/lib/computer-queue";
 import {
   asExchanges,
+  askedHere,
   consultBlocksNearEnd,
   consultNoticeFolds,
   consultsForLine,
+  placeAskedElsewhere,
 } from "@agenteschat/client/lib/consult-group";
 import { errorText, sendNeedsEdit } from "@agenteschat/client/lib/errors";
 import { mentionsReader, offersEveryone } from "@agenteschat/client/lib/everyone";
@@ -177,6 +179,7 @@ import { ChannelPicker } from "./ChannelPicker";
 import { ChannelWelcome } from "./ChannelWelcome";
 import { ChatSkeleton } from "./ChatSkeleton";
 import { type OpenedMessages, OpenedMessagesContext } from "./ClippedMessage";
+import { ConsultPairRow } from "./ConsultGroup";
 import { ConversationSwitcher } from "./ConversationSwitcher";
 import { takeComposerRequest, useComposerRequest } from "./composer-request";
 import { DATE_PILL_IDLE_MS, DatePill } from "./DatePill";
@@ -257,6 +260,7 @@ type Row =
   | { kind: "browser"; key: string; run: null; handoff: BrowserHandoff }
   /** Where the picture an agent is making will show (`makingImage`), until its reply takes its place. */
   | { kind: "image"; key: string; run: LiveRun }
+  | { kind: "asked"; key: string; consultation: RunConsultation }
   | { kind: "unseen"; key: string; fading: boolean };
 
 const rowKey = (r: Row) => r.key;
@@ -596,6 +600,7 @@ function Chat({
   const waitsKey = waitsNow.map((w) => `${w.agentId}:${w.runId}`).join(" ");
   // biome-ignore lint/correctness/useExhaustiveDependencies: new only when the waits change, not on every receipt
   const waits = useMemo(() => waitsNow, [waitsKey]);
+  const consultData = useConsultations(orgId, channelId).data;
   const rows = useMemo<Row[]>(() => {
     const waitRows = waits.map((wait) => ({
       kind: "wait" as const,
@@ -644,22 +649,49 @@ function Chat({
     }
     // A thread's replies live in the thread; the channel shows its link.
     const hidden = (m: Message) => superseded.has(m.id) || Boolean(m.threadId);
+    const base = buildRows(list, hidden);
+    const placed = placeAskedElsewhere(
+      base.map((r) =>
+        r.kind === "day"
+          ? { key: r.key, at: new Date(new Date(r.iso).setHours(0, 0, 0, 0)).toISOString() }
+          : { key: r.key, at: r.message.createdAt },
+      ),
+      consultData ?? NO_CONSULTATIONS,
+    );
+    const asked = (c: RunConsultation) => ({ kind: "asked" as const, key: `asked-${c.id}`, consultation: c });
     return [
-      ...buildRows(list, hidden),
+      ...base.flatMap((r) => [...(placed.before.get(r.key) ?? []).map(asked), r]),
+      ...placed.after.map(asked),
       ...browsing.map((run) => ({ kind: "browser" as const, key: `browser-${run.agentId}`, run })),
       ...held.map((h) => ({ kind: "browser" as const, key: `browser-${h.agentId}`, run: null, handoff: h })),
       ...making.map((run) => ({ kind: "image" as const, key: `image-${run.runId}`, run })),
       ...waitRows,
     ];
-  }, [isThread, threadId, list, thread.data, channel?.name, dm, browsing, held, making, superseded, t, waits]);
+  }, [
+    isThread,
+    threadId,
+    list,
+    thread.data,
+    channel?.name,
+    dm,
+    browsing,
+    held,
+    making,
+    superseded,
+    t,
+    waits,
+    consultData,
+  ]);
   const shownMessages = useMemo(() => rows.flatMap((r) => (r.kind === "message" ? [r.message] : [])), [rows]);
   // Questions agents asked other agents, in the pair row before the replies that asked (`ConsultGroup`): how each
   // answer's notice draws (hidden under a reply close by, one line to one farther up, and while its asker still works
   // and posted nothing yet: its reply brings the row), and the working line without the questions a reply near the
   // end shows (an asker at work shows none: the line says them).
   // An exchange between the same two agents draws on its first asking run's reply (`asExchanges`).
-  const consultData = useConsultations(orgId, channelId).data;
-  const consultList = useMemo(() => (consultData ? asExchanges(consultData) : NO_CONSULTATIONS), [consultData]);
+  const consultList = useMemo(
+    () => (consultData ? asExchanges(askedHere(consultData)) : NO_CONSULTATIONS),
+    [consultData],
+  );
   const liveTurns = useMemo(
     () => new Set(atWork.flatMap((r) => (shownMessages.some((m) => m.agentRunId === r.runId) ? [] : [r.runId]))),
     [atWork, shownMessages],
@@ -1940,6 +1972,15 @@ function Chat({
             </Animated.View>
           );
         }
+        case "asked":
+          return (
+            <ConsultPairRow
+              askerId={item.consultation.agentId}
+              channelId={channelId}
+              items={[item.consultation]}
+              asked
+            />
+          );
         case "image":
           return (
             <Animated.View

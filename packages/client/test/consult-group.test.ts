@@ -3,6 +3,8 @@ import type { TFunction } from "i18next";
 import type { RunConsultation } from "../src/api/types";
 import {
   asExchanges,
+  askedElsewhere,
+  askedHere,
   consultAskedKey,
   consultBlocksNearEnd,
   consultChoiceKey,
@@ -23,6 +25,7 @@ import {
   foldsNotice,
   groupsByRun,
   pairItemOf,
+  placeAskedElsewhere,
   shownConsultations,
 } from "../src/lib/consult-group";
 import { consultTimeText } from "../src/lib/consultations";
@@ -473,4 +476,32 @@ test("a row's time: its clock while it's out, how long it took once it's back, i
   const t = ((key: string, values: { time: string }) => `${key} ${values.time}`) as unknown as TFunction;
   expect(consultTimeText(t, "en", true, 42)).toBe("42 s");
   expect(consultTimeText(t, "en", false, 1446 * 60)).toBe("chat.consultPair.took 24 h");
+});
+
+describe("asked of this DM's agent from another conversation", () => {
+  const here = q({ id: "here", createdAt: iso(5) });
+  const late = q({ id: "late", fromElsewhere: true, createdAt: iso(90) });
+  const early = q({ id: "early", fromElsewhere: true, createdAt: iso(10) });
+  const after = q({ id: "after", fromElsewhere: true, createdAt: iso(500) });
+
+  test("stays out of the exchanges asked here, oldest first", () => {
+    expect(askedHere([here, late, early]).map((c) => c.id)).toEqual(["here"]);
+    expect(askedElsewhere([here, late, early]).map((c) => c.id)).toEqual(["early", "late"]);
+  });
+
+  test("stands where the request came in, between the rows around that moment", () => {
+    const anchors = [
+      { key: "day", at: iso(0) },
+      { key: "m1", at: iso(30) },
+      { key: "m2", at: iso(60) },
+      { key: "m3", at: iso(120) },
+      { key: "wait", at: null },
+    ];
+    const placed = placeAskedElsewhere(anchors, [after, late, here, early]);
+    expect([...placed.before.entries()].map(([k, v]) => [k, v.map((c) => c.id)])).toEqual([
+      ["m1", ["early"]],
+      ["m3", ["late"]],
+    ]);
+    expect(placed.after.map((c) => c.id)).toEqual(["after"]);
+  });
 });

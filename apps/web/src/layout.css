@@ -488,6 +488,11 @@ html:not([data-pointer]) .consult-pair__row:focus-visible {
   margin-inline: 6px;
   vertical-align: calc(var(--cap-top) - var(--cap-mid) - 7.5px);
 }
+.consult-pair__asked {
+  flex: none;
+  margin-inline: 6px;
+  color: var(--muted);
+}
 /* Cut out of what is under them: the open row's blue too (the page's ring drew gray circles on it in dark). */
 .consult-pair__faces > .ac-avatar {
   box-shadow: 0 0 0 1.5px var(--stack-ring, var(--surface));
