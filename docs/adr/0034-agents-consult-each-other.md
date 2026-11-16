@@ -126,3 +126,12 @@ A person asked an agent for cover images in a thread; that agent asked a second 
 - **Every chain counts.** A second request for the same person joins a consulted run still at work (`startOrJoinRun`), so one run may answer agents in several conversations. `consultationOrigin` names the latest alone, which is where the run's cards go; the refusal looks at all of them.
 - **Not a heads-up.** Nobody carries the reply to a `tell_agent` with `heads_up`, so a run woken by one may still post there.
 - **Unchanged.** Any other channel the person can post in, `send_dm` to the person behind the run (the agents' DM offers it), a run that answers agents only (refused everywhere, ADR 0085 addendum), and where a consulted run's approval, question, secret and file cards go.
+
+## Addendum (2026-11-15): the request, in the person's DM with the agent it went to
+
+A person asks Lodi something, and Lodi asks Claudião. The row for that request showed only where the person asked Lodi. When the person later opened their own DM with Claudião, nothing there said Claudião had been asked anything on their behalf, or that it was still working on it.
+
+- **The same row, from the other side.** A person's DM with an agent also lists the questions and notes another agent sent that agent from somewhere else for that person (`consultationsIn`, flagged `fromElsewhere`). The row stands at the moment the request came in and reads "Lodi pediu ao Claudião · … · levou 4 min", with the clock while it's out. It opens the same read-only conversation (`consultationConversation`) as the row where it was asked.
+- **Whose DM.** Only the person behind the request, the root person of the asker's run (`runAuthorityById`), sees it, and only in a DM with the consulted agent that already exists. No DM is opened for it. Nobody else sees it there, and the conversation endpoint refuses it from any other DM. A request asked from the person's own DM with that agent shows once.
+- **Live.** When the request goes out, comes back or changes, `agent.consultation` is published to that DM too (`announceInConsultedDm`), and web and mobile load the list again. The DM is never sent a working line of its own.
+- **Not a turn.** These rows are left out of the groups, folds and end-of-chat blocks of the requests asked in that conversation, and out of threads.
