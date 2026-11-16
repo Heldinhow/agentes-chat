@@ -10640,10 +10640,10 @@
       "copiesRemoved_one": "{{count}} inicio de sesión sin uso quitado.",
       "copiesRemoved_many": "{{count}} inicios de sesión sin uso quitados.",
       "copiesRemoved_other": "{{count}} inicios de sesión sin uso quitados.",
-      "removeAllDone": "{{n}} inicios de sesión de Grok quitados.",
-      "removeAllText": "Dejan de pensar por sus agentes en {{computers}}. Los inicios de sesión de otras personas no se tocan.",
-      "removeAllTitle": "¿Quitar los {{n}} inicios de sesión de Grok?",
       "removeAllGrok": "Quitar todos los inicios de sesión de Grok",
+      "removeAllTitle": "¿Quitar los {{n}} inicios de sesión de Grok?",
+      "removeAllText": "Dejan de pensar por sus agentes en {{computers}}. Los inicios de sesión de otras personas no se tocan.",
+      "removeAllDone": "{{n}} inicios de sesión de Grok quitados.",
       "disconnect": "Desconectar",
       "renameTitle": "Cambiar el nombre de {{label}}",
       "nameLabel": "Nombre",
@@ -17625,7 +17625,8 @@
       "noAnswer": "no respondió",
       "notFinished": "no terminó",
       "someAnswered": "respondieron {{done}} de {{total}}",
-      "labelMany": "Conversaciones de {{from}} con {{to}}"
+      "labelMany": "Conversaciones de {{from}} con {{to}}",
+      "asked": "le pidió a"
     },
     "consultPanel": {
       "label": "Conversación entre {{from}} y {{to}}",

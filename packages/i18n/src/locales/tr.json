@@ -10253,10 +10253,10 @@
       "removeCopies": "Kaldır",
       "copiesRemoved_one": "Kullanılmayan {{count}} giriş kaldırıldı.",
       "copiesRemoved_other": "Kullanılmayan {{count}} giriş kaldırıldı.",
-      "removeAllDone": "{{n}} Grok oturumu kaldırıldı.",
-      "removeAllText": "{{computers}} üzerinde artık kendi ajanları için düşünmezler. Başkalarının oturumlarına dokunulmaz.",
-      "removeAllTitle": "{{n}} Grok oturumunun tümü kaldırılsın mı?",
       "removeAllGrok": "Tüm Grok oturumlarını kaldır",
+      "removeAllTitle": "{{n}} Grok oturumunun tümü kaldırılsın mı?",
+      "removeAllText": "{{computers}} üzerinde artık kendi ajanları için düşünmezler. Başkalarının oturumlarına dokunulmaz.",
+      "removeAllDone": "{{n}} Grok oturumu kaldırıldı.",
       "disconnect": "Bağlantıyı kes",
       "renameTitle": "{{label}} adını değiştir",
       "nameLabel": "Ad",
@@ -17090,7 +17090,8 @@
       "noAnswer": "yanıt vermedi",
       "notFinished": "bitiremedi",
       "someAnswered": "{{total}} ajandan {{done}} tanesi yanıt verdi",
-      "labelMany": "{{from}} ile {{to}} arasındaki konuşmalar"
+      "labelMany": "{{from}} ile {{to}} arasındaki konuşmalar",
+      "asked": "sordu:"
     },
     "consultPanel": {
       "label": "{{from}} ile {{to}} arasındaki konuşma",
