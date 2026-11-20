@@ -216,10 +216,14 @@ const GLUED_END = new RegExp(`(?<![_0-9])[${MARKS}]*${NO_REPLY}[${MARKS}.!]*\\s*
 const PARTIAL_END = new RegExp(`(?<![_0-9a-z])[${MARKS}]*N(?:O(?:_(?:R(?:E(?:P(?:L(?:Y)?)?)?)?)?)?)?[${MARKS}.!]*$`);
 const SPELLINGS = ["no_reply", "no-reply", "noreply"];
 
+/** Harnesses end a turn with a marker instead of words: never post it as an announcement or a reply. */
+const TURN_END = /^(?:end of (?:the )?turn|fim (?:de|do) turno)$/i;
+const TURN_END_TAIL = /(?:^|\s)(?:end of (?:the )?turn|fim (?:de|do) turno)[.!]?\s*$/i;
+
 /** A line that is only the word (with marks, spacing, punctuation). */
 export const isSentinelLine = (line: string) => {
   const c = core(line);
-  return WORD.test(c) || c === "NO REPLY";
+  return WORD.test(c) || c === "NO REPLY" || TURN_END.test(c);
 };
 
 /** The whole text is the word cut short ("NO", "NO_RE"): a model stopped mid-word. */
@@ -232,6 +236,7 @@ const isTruncatedSentinel = (text: string) => {
 function couldBeSentinelLine(open: string) {
   if (isSentinelLine(open)) return true;
   const r = open.replace(/^[\s`*_~"'“”‘’()[\]{}<>#|-]+/, "");
+  if (TURN_END.test(core(r))) return true;
   if (!r) return true;
   return SPELLINGS.some((s) => s.startsWith(r.toLowerCase())) || "NO REPLY".startsWith(r);
 }
@@ -278,7 +283,7 @@ export const isSentinelOnly = (text: string) => text.trim() !== "" && stripSenti
 export function endsWithSentinel(text: string) {
   if (isSentinelOnly(text)) return true;
   const last = text.trim().split("\n").at(-1) ?? "";
-  return isSentinelLine(last) || GLUED_END.test(last);
+  return isSentinelLine(last) || GLUED_END.test(last) || TURN_END_TAIL.test(last);
 }
 
 // ── The `pass` tool ──────────────────────────────────────────────────────────
