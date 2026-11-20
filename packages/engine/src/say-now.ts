@@ -25,6 +25,10 @@ export const SAY_NOW_TOOL = "say_now";
 /** The line is short: one sentence or two, never a report. */
 export const SAY_NOW_MAX = 200;
 
+/** ADR 0207: when an agent says its line. `never` turns it off; `human_only` is the workspace's default. */
+export type Announce = "always" | "never" | "human_only";
+export const ANNOUNCE_DEFAULT: Announce = "human_only";
+
 /** A call of `say_now`, by its name as a computer brain's bridge or the gateway records it. */
 export const isSayNow = (name: string) => name === SAY_NOW_TOOL || name.endsWith(`__${SAY_NOW_TOOL}`);
 
@@ -36,15 +40,30 @@ export interface SaidNow {
   at?: number;
 }
 
+/** The agent's own choice, else the workspace's (`agentSetup.announce`), else `human_only` (ADR 0207). */
+async function announceOf(db: Executor, run: AgentRun): Promise<Announce> {
+  // One read on the way to the model: the setup workbook was counted in the run's budget (ADR 0056).
+  const [row] = await db
+    .select({ own: schema.agents.setup, org: schema.organizationSettings.agentSetup })
+    .from(schema.agents)
+    .leftJoin(schema.organizationSettings, eq(schema.organizationSettings.orgId, schema.agents.orgId))
+    .where(and(eq(schema.agents.id, run.agentId), eq(schema.agents.orgId, run.orgId)));
+  const own = (row?.own as { announce?: Announce } | null)?.announce;
+  if (own === "always" || own === "never" || own === "human_only") return own;
+  const fromOrg = (row?.org as { announce?: Announce } | null)?.announce;
+  return fromOrg === "always" || fromOrg === "never" || fromOrg === "human_only" ? fromOrg : ANNOUNCE_DEFAULT;
+}
+
 /**
  * Where the line may go: a person's run, in a conversation people read as it goes (a channel or a DM; not an agents'
- * DM, a mission's thread, background work, a routine's run or a confidential thread). Elsewhere the tool refuses with
- * the reason, and the prompt doesn't speak of it.
+ * DM, a mission's thread, background work, a routine's run or a confidential thread), and the agent's `announce` isn't
+ * `never`. Elsewhere the tool refuses with the reason, and the prompt doesn't speak of it.
  */
 export async function sayNowApplies(db: Executor, run: AgentRun, confidential?: boolean) {
   if (run.background || run.workId) return false;
   // Known to the run already (`sealedAtClaim`): no read of the thread's row on its way to the model.
   if (confidential ?? (await threadIsConfidential(db, run.orgId, run.threadRootId))) return false;
+  if ((await announceOf(db, run)) === "never") return false;
   return movableRun(db, run);
 }
 
@@ -119,6 +138,62 @@ export async function linesSaid(db: Executor, run: LinesRun, limit = 5): Promise
  * message with no run of its own (`runId` null, `meta.sayNow`), like the fast reply's: it is never the reply, the run
  * still owes its answer (`answerOwed`), it notifies nobody, routes to nobody, and the working row stays up.
  */
+export async function postSayNow(deps: { pubsub?: PubSub }, ctx: ToolContext, raw: unknown): Promise<ToolOutput> {
+  const text = sayNowText(raw);
+  if (!text) return refused(REFUSED.empty);
+  // A sign-in or a key is never a line for people (ADR 0137 §4), even masked.
+  const signIn = typeof raw === "string" && scrubSignIns(raw, "").found > 0;
+  if (signIn || isSentinelOnly(text) || endsWithSentinel(text) || NOT_FOR_PEOPLE.test(text))
+    return refused(REFUSED.words);
+  const run = await runOf(ctx);
+  if (!run || run.background) return refused(REFUSED.nobody);
+  if (run.workId) return refused(REFUSED.work);
+  if (!(await sayNowApplies(ctx.db, run, ctx.confidential))) return refused(REFUSED.nobody);
+  const outcome = await ctx.db.transaction(async (tx) => {
+    // Under the run's lock: two calls at once post one line.
+    const [locked] = await tx.select().from(agentRuns).where(eq(agentRuns.id, run.id)).for("update");
+    if (!locked || isTerminal(locked.status)) return { kind: "ended" } as const;
+    const [before] = await linesSaid(tx, locked, 1);
+    if (before) return { kind: "already", body: before.text } as const;
+    // A person wrote since the run last read: the line would answer a conversation that has moved on.
+    if (await personAmong(tx, locked.orgId, locked.pendingMessageIds)) return { kind: "wroteAgain" } as const;
+    const message = await insertMessage(tx, {
+      orgId: locked.orgId,
+      channelId: locked.channelId,
+      threadId: replyThreadOf({ ...locked, confidential: ctx.confidential }),
+      author: {
+        type: "agent",
+        agentId: locked.agentId,
+        runId: null,
+        hop: locked.hop,
+        stretchId: runStretchOf(locked),
+        forRunId: locked.id,
+      },
+      body: text,
+      // A run that read outside content passes the mark on (ADR 0117): the next agent reads the line as relayed.
+      meta: { sayNow: { runId: locked.id }, ...((await runReadOutside(tx, locked)) ? { readOutside: true } : {}) },
+    });
+    // It promised something: the run can't end quiet now (`pass`, the quiet end read this on the row).
+    await tx
+      .update(agentRuns)
+      .set({ transcript: sql`coalesce(${agentRuns.transcript}, '{}'::jsonb) || '{"answerOwed":true}'::jsonb` })
+      .where(eq(agentRuns.id, locked.id));
+    return { kind: "posted", message } as const;
+  });
+  if (outcome.kind === "ended") return refused(REFUSED.ended);
+  if (outcome.kind === "wroteAgain") return refused(REFUSED.wroteAgain, false);
+  if (outcome.kind === "already")
+    return {
+      content: `Already told them: "${outcome.body}". Do the work now; your final message brings the result.`,
+    };
+  const [view] = await withWikiLinks(ctx.db, run.orgId, [messageView(outcome.message)]);
+  if (view && deps.pubsub) await publishMessageCreated(deps.pubsub, view);
+  return {
+    content: "Posted. Do the work now; your final message brings the result, without repeating this line.",
+    data: { saidNow: { text, messageId: outcome.message.id } },
+  };
+}
+
 export function createSayNowToolSource(deps: { pubsub?: PubSub }): ToolSource {
   const tool: ToolDefinition = {
     name: SAY_NOW_TOOL,
@@ -133,60 +208,7 @@ export function createSayNowToolSource(deps: { pubsub?: PubSub }): ToolSource {
     },
     describe: () => ({ title: "Tell them what's next" }),
     async execute(input, ctx) {
-      const raw = (input as { text?: unknown }).text;
-      const text = sayNowText(raw);
-      if (!text) return refused(REFUSED.empty);
-      // A sign-in or a key is never a line for people (ADR 0137 §4), even masked.
-      const signIn = typeof raw === "string" && scrubSignIns(raw, "").found > 0;
-      if (signIn || isSentinelOnly(text) || endsWithSentinel(text) || NOT_FOR_PEOPLE.test(text))
-        return refused(REFUSED.words);
-      const run = await runOf(ctx);
-      if (!run || run.background) return refused(REFUSED.nobody);
-      if (run.workId) return refused(REFUSED.work);
-      if (!(await sayNowApplies(ctx.db, run))) return refused(REFUSED.nobody);
-      const outcome = await ctx.db.transaction(async (tx) => {
-        // Under the run's lock: two calls at once post one line.
-        const [locked] = await tx.select().from(agentRuns).where(eq(agentRuns.id, run.id)).for("update");
-        if (!locked || isTerminal(locked.status)) return { kind: "ended" } as const;
-        const [before] = await linesSaid(tx, locked, 1);
-        if (before) return { kind: "already", body: before.text } as const;
-        // A person wrote since the run last read: the line would answer a conversation that has moved on.
-        if (await personAmong(tx, locked.orgId, locked.pendingMessageIds)) return { kind: "wroteAgain" } as const;
-        const message = await insertMessage(tx, {
-          orgId: locked.orgId,
-          channelId: locked.channelId,
-          threadId: replyThreadOf({ ...locked, confidential: ctx.confidential }),
-          author: {
-            type: "agent",
-            agentId: locked.agentId,
-            runId: null,
-            hop: locked.hop,
-            stretchId: runStretchOf(locked),
-            forRunId: locked.id,
-          },
-          body: text,
-          // A run that read outside content passes the mark on (ADR 0117): the next agent reads the line as relayed.
-          meta: { sayNow: { runId: locked.id }, ...((await runReadOutside(tx, locked)) ? { readOutside: true } : {}) },
-        });
-        // It promised something: the run can't end quiet now (`pass`, the quiet end read this on the row).
-        await tx
-          .update(agentRuns)
-          .set({ transcript: sql`coalesce(${agentRuns.transcript}, '{}'::jsonb) || '{"answerOwed":true}'::jsonb` })
-          .where(eq(agentRuns.id, locked.id));
-        return { kind: "posted", message } as const;
-      });
-      if (outcome.kind === "ended") return refused(REFUSED.ended);
-      if (outcome.kind === "wroteAgain") return refused(REFUSED.wroteAgain, false);
-      if (outcome.kind === "already")
-        return {
-          content: `Already told them: "${outcome.body}". Do the work now; your final message brings the result.`,
-        };
-      const [view] = await withWikiLinks(ctx.db, run.orgId, [messageView(outcome.message)]);
-      if (view && deps.pubsub) await publishMessageCreated(deps.pubsub, view);
-      return {
-        content: "Posted. Do the work now; your final message brings the result, without repeating this line.",
-        data: { saidNow: { text, messageId: outcome.message.id } },
-      };
+      return postSayNow(deps, ctx, (input as { text?: unknown }).text);
     },
   };
   return {

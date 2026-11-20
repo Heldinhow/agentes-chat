@@ -369,7 +369,16 @@ import {
   transitionRun,
 } from "./runs";
 import { SANDBOX_SCOPE, truncateOutput } from "./sandbox";
-import { isSayNow, linesSaid, SAY_NOW_TOOL, type SaidNow, sayNowApplies, sayNowText, withoutSaidNow } from "./say-now";
+import {
+  isSayNow,
+  linesSaid,
+  postSayNow,
+  SAY_NOW_TOOL,
+  type SaidNow,
+  sayNowApplies,
+  sayNowText,
+  withoutSaidNow,
+} from "./say-now";
 import { sharedQueryEmbedding } from "./search";
 import { secretResult } from "./secrets";
 import { enabledSkills } from "./skills";
@@ -2456,6 +2465,7 @@ async function executeRunInner(
     const ai = { db, gateway: deps.gateway, machines: deps.machines };
     transcript.system = await teammatesNowAgain(ai, run.orgId, transcript.system);
   }
+  let sayNowAllowed = false;
   if (!transcript) {
     const contextDeps = deps.context;
     // The tools the context names are core ones: listed whatever groups the judge loads, so it needn't wait for it.
@@ -2496,6 +2506,7 @@ async function executeRunInner(
       // Listed in every run with an id: the line before slow work is spoken of only where people read it as it goes.
       tools.some((t) => t.name === SAY_NOW_TOOL) ? sayNowApplies(db, run, sealedAtClaim).catch(() => false) : false,
     ]);
+    sayNowAllowed = sayNowHere;
     const [context, memory, wikiPages, rules] = await Promise.all([
       buildRunContext(db, run, agent, {
         maxMessages: deps.contextMessages,
@@ -5789,6 +5800,15 @@ async function executeRunInner(
         // Its line on the way (`say_now`, ADR 0207) goes out before the work it announces, whatever order it wrote them in.
         const saidBefore = transcript.saidNow?.length ?? 0;
         const callingAt = transcript.messages.length - 1;
+        // No `say_now` call: the words it wrote before its first tool go out as its line (ADR 0207). Never a line the
+        // server writes: it is the model's own text, with the tool's checks, gates and once-per-run lock.
+        if (sayNowAllowed && !toolUses.some((u) => isSayNow(u.name)) && turnText) {
+          const line = await postSayNow({ pubsub: deps.pubsub }, ctx, turnText);
+          if (line.data?.saidNow) {
+            absorbToolData(transcript, line.data);
+            heardSaidNow(transcript, saidBefore, callingAt);
+          }
+        }
         for (const use of [...toolUses.filter((u) => isSayNow(u.name)), ...toolUses.filter((u) => !isSayNow(u.name))]) {
           // Canceled during a tool, or the server is shutting down: the rest never run.
           if (signal.aborted) break;
