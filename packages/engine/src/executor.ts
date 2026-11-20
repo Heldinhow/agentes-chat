@@ -5800,13 +5800,18 @@ async function executeRunInner(
         // Its line on the way (`say_now`, ADR 0207) goes out before the work it announces, whatever order it wrote them in.
         const saidBefore = transcript.saidNow?.length ?? 0;
         const callingAt = transcript.messages.length - 1;
-        // No `say_now` call: the words it wrote before its first tool go out as its line (ADR 0207). Never a line the
-        // server writes: it is the model's own text, with the tool's checks, gates and once-per-run lock.
-        if (sayNowAllowed && !toolUses.some((u) => isSayNow(u.name)) && turnText) {
-          const line = await postSayNow({ pubsub: deps.pubsub }, ctx, turnText);
-          if (line.data?.saidNow) {
-            absorbToolData(transcript, line.data);
-            heardSaidNow(transcript, saidBefore, callingAt);
+        // No `say_now` call: the words it wrote before its first tool, or a short line from that tool when it wrote
+        // none (ADR 0207). The generated line may name a tool; a line a model wrote may not.
+        if (sayNowAllowed && !toolUses.some((u) => isSayNow(u.name))) {
+          const words = stripSentinel(turnText);
+          const first = toolUses[0];
+          const raw = words || (first ? callLine(first.name, first.input).replace(/_/g, " ") : "");
+          if (raw) {
+            const line = await postSayNow({ pubsub: deps.pubsub }, ctx, raw, !words);
+            if (line.data?.saidNow) {
+              absorbToolData(transcript, line.data);
+              heardSaidNow(transcript, saidBefore, callingAt);
+            }
           }
         }
         for (const use of [...toolUses.filter((u) => isSayNow(u.name)), ...toolUses.filter((u) => !isSayNow(u.name))]) {

@@ -688,6 +688,67 @@ describe("in a run", () => {
     expect(results).toEqual(["toolu_build"]);
   });
 
+  test("with no words before the tool, the fallback posts a short line from the tool and its arguments", async () => {
+    let seen: string[] = [];
+    const read = {
+      name: "read_file",
+      tools: async () => [
+        {
+          name: "read_file",
+          description: "Reads a file.",
+          scope: "",
+          inputSchema: { type: "object", properties: { path: { type: "string" } } },
+          async execute() {
+            seen = (await lines()).map((m) => m.body);
+            return { content: "read: ok" };
+          },
+        },
+      ],
+    };
+    const first = { chunks: [], toolUses: [{ id: "toolu_read", name: "read_file", input: { path: "src/app.ts" } }] };
+    f = await setup({
+      sayNow: true,
+      toolSources: [read],
+      reply: (_request, call) => (call === 1 ? first : { chunks: [BUILT] }),
+    });
+    await post(f.general.id, "@dev lê o arquivo");
+    await drainOutbox(f.db, f.handlers);
+    const [run] = await runs();
+    const [line] = await lines();
+    if (!run || !line) throw new Error("no run, or no line");
+    const short = "read file(src/app.ts)";
+    expect(seen).toEqual([short]);
+    expect(line).toMatchObject({ body: short, agentRunId: null, meta: { sayNow: { runId: run.id } } });
+    expect(await agentSaid(f.general.id)).toEqual([short, BUILT]);
+  });
+
+  test("an end-of-turn marker is empty: no announcement from it, no reply from it", async () => {
+    const first = { chunks: ["End of turn."], toolUses: [{ id: "toolu_build", name: "build", input: {} }] };
+    f = await setup({
+      sayNow: true,
+      toolSources: [slowTool("build")],
+      reply: (_request, call) => (call === 1 ? first : { chunks: ["End of turn."] }),
+    });
+    await post(f.general.id, "@dev roda o build");
+    await drainOutbox(f.db, f.handlers);
+    expect((await lines()).map((m) => m.body)).toEqual(["build"]);
+    expect((await agentSaid(f.general.id)).some((body) => body.includes("End of turn"))).toBe(false);
+  });
+
+  test("the generated line obeys `never` too", async () => {
+    const first = { chunks: [], toolUses: [{ id: "toolu_build", name: "build", input: {} }] };
+    f = await setup({
+      sayNow: true,
+      toolSources: [slowTool("build")],
+      reply: (_request, call) => (call === 1 ? first : { chunks: [BUILT] }),
+    });
+    await setAnnounce("never");
+    await post(f.general.id, "@dev roda o build");
+    await drainOutbox(f.db, f.handlers);
+    expect(await lines()).toEqual([]);
+    expect(await agentSaid(f.general.id)).toEqual([BUILT]);
+  });
+
   test("the fallback obeys the flag: with `never` the words before the tool post nothing", async () => {
     const first = { chunks: [LINE], toolUses: [{ id: "toolu_build", name: "build", input: {} }] };
     f = await setup({

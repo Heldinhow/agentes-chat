@@ -138,12 +138,18 @@ export async function linesSaid(db: Executor, run: LinesRun, limit = 5): Promise
  * message with no run of its own (`runId` null, `meta.sayNow`), like the fast reply's: it is never the reply, the run
  * still owes its answer (`answerOwed`), it notifies nobody, routes to nobody, and the working row stays up.
  */
-export async function postSayNow(deps: { pubsub?: PubSub }, ctx: ToolContext, raw: unknown): Promise<ToolOutput> {
+export async function postSayNow(
+  deps: { pubsub?: PubSub },
+  ctx: ToolContext,
+  raw: unknown,
+  generated = false,
+): Promise<ToolOutput> {
   const text = sayNowText(raw);
   if (!text) return refused(REFUSED.empty);
   // A sign-in or a key is never a line for people (ADR 0137 §4), even masked.
   const signIn = typeof raw === "string" && scrubSignIns(raw, "").found > 0;
-  if (signIn || isSentinelOnly(text) || endsWithSentinel(text) || NOT_FOR_PEOPLE.test(text))
+  // The server's own fallback names a tool on purpose: the check is on what a model chose to post.
+  if (signIn || isSentinelOnly(text) || endsWithSentinel(text) || (!generated && NOT_FOR_PEOPLE.test(text)))
     return refused(REFUSED.words);
   const run = await runOf(ctx);
   if (!run || run.background) return refused(REFUSED.nobody);

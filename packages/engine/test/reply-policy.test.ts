@@ -153,6 +153,15 @@ describe("the sentinel", () => {
     expect(endsWithSentinel("Novidade.")).toBe(false);
   });
 
+  test("a harness' end-of-turn marker is a sentinel too: never an announcement or a reply", () => {
+    for (const t of ["End of turn.", "end of turn", "**End of turn.**", "Fim de turno.", "Fim do turno."])
+      expect(isSentinelOnly(t)).toBe(true);
+    expect(stripSentinel("Vou verificar.\n\nEnd of turn.")).toBe("Vou verificar.");
+    expect(endsWithSentinel("Vou verificar. End of turn.")).toBe(true);
+    expect(endsWithSentinel("End of turn.\n\nAchei: 3 servidores.")).toBe(false);
+    expect(isSentinelOnly("O turno acabou.")).toBe(false);
+  });
+
   test("streaming: held while it could still be the word, never shown, and what was shown only grows", () => {
     const stream = (chunks: string[]) => {
       let all = "";
