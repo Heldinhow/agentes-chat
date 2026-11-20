@@ -152,6 +152,27 @@ const ctxOf = (run: AgentRun): ToolContext => ({
   ...(run.background ? { background: true } : {}),
 });
 
+/** `announce` in the agent's setup, or in the workspace's default (`agentSetup`). */
+async function setAnnounce(announce: "always" | "never" | "human_only", where: "agent" | "org" = "agent") {
+  if (where === "agent") {
+    const [agent] = await f.db.select().from(schema.agents).where(eq(schema.agents.id, f.agent.id));
+    await f.db
+      .update(schema.agents)
+      .set({ setup: { ...(agent?.setup ?? { role: null, done: [] }), announce } })
+      .where(eq(schema.agents.id, f.agent.id));
+  } else {
+    await f.db.insert(schema.organizationSettings).values({ orgId: f.org.id }).onConflictDoNothing();
+    const [org] = await f.db
+      .select()
+      .from(schema.organizationSettings)
+      .where(eq(schema.organizationSettings.orgId, f.org.id));
+    await f.db
+      .update(schema.organizationSettings)
+      .set({ agentSetup: { ...(org?.agentSetup ?? { brain: "model", model: null }), announce } })
+      .where(eq(schema.organizationSettings.orgId, f.org.id));
+  }
+}
+
 /** `say_now` called in `run` through the Tool Gateway, as the engine and the bridge call it. */
 async function sayNow(run: AgentRun, text: string) {
   const result = await tools().invoke(ctxOf(run), {
@@ -452,6 +473,35 @@ describe("the tool", () => {
     });
   });
 
+  test("the announce flag: the workspace fills in, the agent decides, and `never` posts nothing", async () => {
+    f = await setup({ sayNow: true });
+    const dm = await openDm(f.db, f.owner.id, f.org.id, { agentId: f.agent.id });
+    const run = await runOver(dm.id);
+    expect(await sayNowApplies(f.db, run)).toBe(true);
+    await setAnnounce("never", "org");
+    expect(await sayNowApplies(f.db, run)).toBe(false);
+    expect((await sayNow(run, LINE)).isError).toBe(true);
+    expect(await lines()).toEqual([]);
+    // Its own choice wins over the workspace's.
+    await setAnnounce("always");
+    expect(await sayNowApplies(f.db, run)).toBe(true);
+    expect((await sayNow(run, LINE)).isError).toBeFalsy();
+    expect((await lines()).map((m) => m.body)).toEqual([LINE]);
+    // `never` on the agent, even with the workspace on: another run gets no line.
+    await setAnnounce("never");
+    const next = await runOver(dm.id);
+    expect(await sayNowApplies(f.db, next)).toBe(false);
+    expect((await sayNow(next, LINE)).isError).toBe(true);
+    expect((await lines()).map((m) => m.body)).toEqual([LINE]);
+  });
+
+  test("with the flag off the prompt doesn't speak of the line", async () => {
+    f = await setup({ sayNow: true, reply: () => ({ chunks: ["Oi, pronto."] }) });
+    await setAnnounce("never");
+    await routed("alguém roda o build?");
+    expect(systemText(f.provider.calls[0]?.request.system ?? "")).not.toContain(SAY_NOW_LINE);
+  });
+
   test("elsewhere it says why and posts nothing; a routine's run doesn't list it at all", async () => {
     f = await setup({ sayNow: true });
     const at = await places();
@@ -606,6 +656,50 @@ describe("in a run", () => {
     const jobs = await f.db.select().from(schema.outbox);
     expect(jobs.find((j) => j.kind === "message.posted" && j.payload.messageId === line.id)?.status).toBe("done");
     expect(jobs.filter((j) => j.kind === AGENT_MEDIA_JOB && j.payload.messageId === line.id)).toEqual([]);
+  });
+
+  test("without a say_now call, the words before the tool go out as the line, once", async () => {
+    let seen: string[] = [];
+    const build = slowTool("build", async () => {
+      seen = (await lines()).map((m) => m.body);
+    });
+    const first = { chunks: [LINE], toolUses: [{ id: "toolu_build", name: "build", input: {} }] };
+    f = await setup({
+      sayNow: true,
+      toolSources: [build],
+      reply: (_request, call) => (call === 1 ? first : { chunks: [BUILT] }),
+    });
+    await post(f.general.id, "@dev roda o build");
+    await drainOutbox(f.db, f.handlers);
+    const [run] = await runs();
+    const [line] = await lines();
+    if (!run || !line) throw new Error("no run, or no line");
+    // Out while the work ran, not made up by the server: the model's own words before its call.
+    expect(seen).toEqual([LINE]);
+    expect(line).toMatchObject({ body: LINE, agentRunId: null, meta: { sayNow: { runId: run.id } } });
+    expect(saidNowOf(run)).toEqual([{ text: LINE, messageId: line.id, at: expect.any(Number) }]);
+    expect(await agentSaid(f.general.id)).toEqual([LINE, BUILT]);
+    // No tool call was added: the fallback posted the line itself, with the same record as `say_now`.
+    const steps = await f.db.select().from(schema.agentRunSteps).where(eq(schema.agentRunSteps.runId, run.id));
+    expect(steps.filter((s) => s.kind === "tool_call").map((s) => s.data.name)).toEqual(["build"]);
+    const results = (f.provider.calls[1]?.request.messages ?? [])
+      .flatMap((m) => (typeof m.content === "string" ? [] : m.content))
+      .flatMap((b) => (b.type === "tool_result" ? [b.toolUseId] : []));
+    expect(results).toEqual(["toolu_build"]);
+  });
+
+  test("the fallback obeys the flag: with `never` the words before the tool post nothing", async () => {
+    const first = { chunks: [LINE], toolUses: [{ id: "toolu_build", name: "build", input: {} }] };
+    f = await setup({
+      sayNow: true,
+      toolSources: [slowTool("build")],
+      reply: (_request, call) => (call === 1 ? first : { chunks: [BUILT] }),
+    });
+    await setAnnounce("never");
+    await post(f.general.id, "@dev roda o build");
+    await drainOutbox(f.db, f.handlers);
+    expect(await lines()).toEqual([]);
+    expect(await agentSaid(f.general.id)).toEqual([BUILT]);
   });
 
   test("a reply that opens with the line again doesn't say it twice", async () => {

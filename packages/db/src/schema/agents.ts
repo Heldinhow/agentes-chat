@@ -186,6 +186,8 @@ export const agents = pgTable(
       hello?: string;
       starter?: string;
       apps?: Record<string, "read" | "write">;
+      /** ADR 0207: whether it says its line before slow work. Null/omitted: the workspace's `agentSetup.announce`. */
+      announce?: "always" | "never" | "human_only";
     }>(),
     /**
      * Its computer (ADR 0025): the connected machine it works on; null = none yet (the workspace's own computer
@@ -450,6 +452,8 @@ export interface AgentSetup {
   contextTokens?: number | null;
   /** Its Autonomia (`agents.mission_command_approval`); null: the default. */
   autonomy?: string | null;
+  /** ADR 0207: the workspace's default for an agent's line before slow work; omitted: `human_only`. */
+  announce?: "always" | "never" | "human_only";
 }
 
 /**
