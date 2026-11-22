@@ -508,6 +508,7 @@ async function boot(
   if (!(await enableSvgRasterizer())) log.warn("svg pictures", { drawn: false, because: "resvg didn't load" });
   const workers = startWorkers({
     db: database.db,
+    roomMaxWaitMs: config.COMPUTER_QUEUE_MAX_WAIT_MINUTES * 60_000,
     handlers: engine.handlers,
     pubsub: adapters.pubsub,
     context: engine.context,

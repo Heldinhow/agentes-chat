@@ -444,6 +444,12 @@ export const envVars = {
       "How many agent runs one Claude plan sign-in (a subscription, never an API key) works on at once. Past it, the next run waits in line like any other and starts as soon as one ends. 0 turns the limit off.",
     section: "Agents",
   },
+  COMPUTER_QUEUE_MAX_WAIT_MINUTES: {
+    schema: z.coerce.number().int().min(0).max(1440).default(30),
+    description:
+      "How long a run may wait in a computer's line for room before it leaves it and stops with the reason `room_wait_timeout`. A run waiting for a computer that is away leaves the line at once and resumes when the computer is back. 0 turns the time limit off.",
+    section: "Agents",
+  },
   AGENT_MAX_TOOL_TURNS: {
     schema: z.coerce.number().int().min(1).max(200).default(200),
     description:

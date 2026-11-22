@@ -521,10 +521,13 @@ const ManagedTask = z
         of: z.number().int(),
         people: z.boolean(),
         estimatedStartAt: z.string().nullable(),
+        waitedMs: z.number().int().nullable(),
+        cause: z.enum(["line", "sign_in", "spacing", "memory", "machine_offline"]).nullable(),
       })
       .nullable()
       .openapi({
-        description: "Its place in its computer's line for room: people's turns first, then the longest wait.",
+        description:
+          "Its place in its computer's line for room: people's turns first, then the longest wait. `waitedMs` is how long it has waited and `cause` what held it at its last look.",
       }),
     wait: z
       .object({

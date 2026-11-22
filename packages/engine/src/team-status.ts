@@ -6,6 +6,7 @@ import { seesAgentDetails } from "./audience";
 import { publicChannelIds, readsOrMayJoin } from "./channels";
 import { proposalsWaitingFor } from "./context/proposals";
 import { listIssues, nameableIn } from "./issues";
+import { MACHINE_STALE_MS } from "./machines";
 import { oneLine } from "./mail/text";
 import { appPageLink } from "./message-links";
 import { getMembership } from "./organizations";
@@ -202,6 +203,23 @@ export async function teamStatus(
         const seenHere = reads.has(r.channel_id);
         return `- @${handle.get(r.agent_id)}: ${r[key]}${seenHere ? where(r.channel_id) : " somewhere this person can't see"}`;
       });
+  const inLineNow = ids.length
+    ? rowsOf<{ agent_id: string; since: string | null; room: string | null; offline: boolean }>(
+        await db.execute(sql`select r.agent_id, r.transcript->>'roomWaitSince' as since,
+            r.transcript->'waitingForBrain'->>'room' as room,
+            not (m.online and m.deleted_at is null and m.last_seen_at > now() - ${`${MACHINE_STALE_MS / 1000} seconds`}::interval) as offline
+          from agent_runs r left join machines m on m.id = r.waiting_machine_id
+          where r.org_id = ${orgId}::uuid and r.status = 'waiting_input'
+            and r.transcript->'waitingForBrain'->>'code' in ('busy', 'machine_offline')
+            and r.agent_id = any(${`{${ids.join(",")}}`}::uuid[])`),
+      )
+    : [];
+  // Runs held in a computer's line: how long, and why (a gate, or the computer being away).
+  const lineWaits = inLineNow.map((r) => {
+    const mins = r.since ? Math.round((now.getTime() - Number(r.since)) / 60_000) : null;
+    const why = r.offline ? "computer away" : (r.room ?? "waiting for room");
+    return `- @${handle.get(r.agent_id)}: ${mins === null ? "waiting" : `waiting ${mins} min`} in a computer's line (${why})`;
+  });
   const waiting = approvals.filter((a) => a.canDecide);
   const asked = await forThem(questions.map((q) => q.runId));
   const needs = [
@@ -227,6 +245,7 @@ export async function teamStatus(
     ),
     section(`Open tasks (${open.length}):`, open.slice(0, TASKS_LISTED).map(task)),
     section("Stuck for hours:", stuck.slice(0, TASKS_LISTED).map(task)),
+    section("Waiting in a computer's line:", lineWaits),
     section("Tasks done today:", done.slice(0, TASKS_LISTED).map(task)),
     section("Runs finished today:", counts("done")),
     section("Runs that failed today:", counts("failed")),

@@ -14,7 +14,7 @@ import { ACCESS_COLUMNS, managesAgentSql } from "./audience";
 import { runAuthorityById } from "./authority";
 import type { ModelScope } from "./brains/select";
 import { TtlCache } from "./cache";
-import { computerQueue as lineOfComputer, seesRunSql } from "./computer-queue";
+import { computerQueue as lineOfComputer, type QueueWaitCause, seesRunSql } from "./computer-queue";
 import { isAgentOnlyDm } from "./dms";
 import { NotFoundError } from "./errors";
 import { type CanceledReturn, canceledReturns, type PendingReturn, pendingReturns } from "./follow-through";
@@ -173,6 +173,9 @@ export interface ManagedTask {
     people: boolean;
     /** When it should start, from the line's estimates; null with no basis. */
     estimatedStartAt: string | null;
+    /** How long it has waited for room (ms), and what held it at its last look (`QueueWaitCause`); null: not recorded. */
+    waitedMs: number | null;
+    cause: QueueWaitCause | null;
   } | null;
   /** Why a `waiting_input` run waits on no person's answer yet; null for any other run. */
   wait: TaskWait | null;
@@ -807,6 +810,8 @@ async function computerLines(db: Database, userId: string, orgId: string, machin
         of: queue.waiting.length,
         people: w.people,
         estimatedStartAt: w.estimatedStartAt,
+        waitedMs: w.waitedMs,
+        cause: w.cause,
       });
     }
   }

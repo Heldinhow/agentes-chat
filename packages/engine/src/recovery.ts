@@ -3,11 +3,13 @@ import { and, asc, type Database, desc, type Executor, eq, inArray, rowsOf, sche
 import { textOf } from "@agenteschat/providers";
 import { announceAgentStatus } from "./agent-status";
 import { publishApproval } from "./approvals";
-import { executesHere, RUN_STALE_MS } from "./cancel";
+import { executesHere, RUN_STALE_MS, stopRun } from "./cancel";
+import { inLine, kickRoomQueue, publishQueueChanged, ROOM_MAX_WAIT_MS } from "./computer-queue";
 import { onConsultedRunFinished } from "./consultations";
 import { ValidationError } from "./errors";
 import { publishChannelEvent, publishMessageCreated } from "./events";
 import type { Transcript } from "./executor";
+import { machineOnline } from "./machines";
 import { getMessage, insertMessage, messageView } from "./messages";
 import { enqueue } from "./outbox";
 import { closeRoutineRun } from "./routine-ledger";
@@ -27,7 +29,7 @@ import { cancelSecretRequests, publishSecret, syncSecretMessage } from "./secret
 import { USAGE_WAIT_CODES } from "./usage-pause";
 import { endWork } from "./works";
 
-const { agentRuns, agentRunSteps, outbox, channels, approvals } = schema;
+const { agentRuns, agentRunSteps, outbox, channels, approvals, machines } = schema;
 
 /** A run is resumed at most this many times after a dead worker; then it fails. */
 const MAX_RECOVERIES = 2;
@@ -436,3 +438,59 @@ export async function activeRunsIn(db: Database, orgId: string, channelId: strin
 /** `array_to_json(uuid[])`: parsed by the driver, or still text. */
 export const pendingIds = (v: string[] | string | null): string[] =>
   Array.isArray(v) ? v : typeof v === "string" ? (JSON.parse(v) as string[]) : [];
+
+/**
+ * Takes runs out of the lines they hold up (the worker's minute sweep). In line for a computer that is away: the wait
+ * becomes an outage's (`machine_offline`, resumed when the computer is back), so it no longer counts as ahead of the
+ * others. In line past `maxWaitMs` (0: no limit): stopped with `room_wait_timeout`, which says why. The next in line
+ * is asked at once for each computer freed.
+ */
+export async function releaseStuckLine(
+  deps: { db: Database; pubsub?: PubSub },
+  options: { maxWaitMs?: number; now?: number } = {},
+): Promise<{ offline: string[]; timedOut: string[] }> {
+  const { db } = deps;
+  const now = options.now ?? Date.now();
+  const maxWaitMs = options.maxWaitMs ?? ROOM_MAX_WAIT_MS;
+  const out = { offline: [] as string[], timedOut: [] as string[] };
+  const rows = await db
+    .select({
+      run: agentRuns,
+      channelKind: channels.kind,
+      machine: machines,
+      since: sql<string | null>`${agentRuns.transcript}->>'roomWaitSince'`,
+    })
+    .from(agentRuns)
+    .innerJoin(machines, eq(machines.id, agentRuns.waitingMachineId))
+    .leftJoin(channels, eq(channels.id, agentRuns.channelId))
+    .where(inLine)
+    .limit(200);
+  const freed = new Map<string, string>();
+  for (const r of rows) {
+    const machineId = r.run.waitingMachineId as string;
+    try {
+      if (maxWaitMs > 0 && r.since !== null && now - Number(r.since) > maxWaitMs) {
+        await stopRun(deps, r.run.orgId, r.run, r.channelKind, { type: "system", reason: "room_wait_timeout" });
+        out.timedOut.push(r.run.id);
+      } else if (!machineOnline(r.machine, new Date(now))) {
+        const [moved] = await db
+          .update(agentRuns)
+          .set({
+            transcript: sql`jsonb_set(${agentRuns.transcript}, '{waitingForBrain,code}', '"machine_offline"'::jsonb)`,
+          })
+          .where(and(eq(agentRuns.id, r.run.id), inLine))
+          .returning({ id: agentRuns.id });
+        if (!moved) continue;
+        out.offline.push(r.run.id);
+      } else continue;
+      freed.set(machineId, r.run.orgId);
+    } catch {
+      // One run that can't be released never holds back the others: the next sweep tries it again.
+    }
+  }
+  for (const [machineId, orgId] of freed) {
+    await kickRoomQueue(db, machineId).catch(() => {});
+    await publishQueueChanged(deps.pubsub, orgId, machineId).catch(() => {});
+  }
+  return out;
+}

@@ -773,6 +773,8 @@ export interface Transcript {
     reading?: PlanReadingRef;
     /** Its computer is just gone (within the outage grace): it waits without a word, and no outage shows yet. */
     quiet?: boolean;
+    /** A wait for room: the gate that held it at its last look (`roomGate`), for the line's views. */
+    room?: RoomWaitCause;
     /** A plan wait with every account of the order at its limit: how many (`resetsAt` is the first of them to reset). */
     chain?: number;
   };
@@ -4057,6 +4059,7 @@ async function executeRunInner(
       waitId: Bun.randomUUIDv7(),
       at: Date.now(),
       ...(quietUntil !== null ? { quiet: true } : {}),
+      ...(busy && u.room ? { room: u.room } : {}),
     };
     if (!stillBusy)
       await addRunStep(db, run, "error", {

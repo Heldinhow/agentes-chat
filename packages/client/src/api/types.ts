@@ -7607,6 +7607,9 @@ export interface ManagedTask {
     people: boolean;
     /** When it should start (the line's estimate); null with no basis. */
     estimatedStartAt: string | null;
+    /** How long it has waited for room (ms), and what held it last: `line`, `sign_in`, `spacing`, `memory` or `machine_offline`. */
+    waitedMs?: number | null;
+    cause?: "line" | "sign_in" | "spacing" | "memory" | "machine_offline" | null;
   } | null;
   /** Why a `waiting_input` run waits (absent on an older server). */
   wait?: TaskWait | null;

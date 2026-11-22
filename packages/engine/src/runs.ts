@@ -478,6 +478,7 @@ export const SYSTEM_STOP_REASONS = [
   "routine_paused",
   "routine_deleted",
   "routine_creator_left",
+  "room_wait_timeout",
   "workspace_paused",
   "workspace_suspended",
   "workspace_deleting",
