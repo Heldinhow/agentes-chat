@@ -61,6 +61,7 @@ import {
   recoverStaleRuns,
   refreshPlanModels,
   releaseJobs,
+  releaseStuckLine,
   sweepEndedInboxes,
   sweepExpiredVoice,
   sweepFeedbackFiles,
@@ -118,6 +119,8 @@ export function logJobFailure(log: Logger, job: OutboxJob, error: unknown, outco
 
 export interface WorkerDeps {
   db: Database;
+  /** How long a run may wait for room in a computer's line (`releaseStuckLine`; 0: no limit). */
+  roomMaxWaitMs?: number;
   handlers: JobHandlers;
   pubsub: PubSub;
   /** Memory jobs (idle reflection, nightly consolidation). */
@@ -393,6 +396,8 @@ export function startWorkers(deps: WorkerDeps) {
       { onError: (runId, error) => log.warn("a stale run couldn't be recovered", { runId, error: String(error) }) },
     );
     if (r.resumed.length + r.failed.length + r.requeued.length > 0) log.info("stale runs recovered", r);
+    const line = await releaseStuckLine({ db, pubsub: deps.pubsub }, { maxWaitMs: deps.roomMaxWaitMs });
+    if (line.offline.length + line.timedOut.length > 0) log.info("runs released from a computer's line", line);
     // Long work whose run ended without closing it (a crash between the two) gets its end, once (ADR 0121 §7).
     const closed = await reconcileWorks({ db, pubsub: deps.pubsub });
     if (closed > 0) log.warn("background works closed by the sweep", { works: closed });

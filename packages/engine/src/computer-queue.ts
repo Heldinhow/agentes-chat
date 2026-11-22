@@ -17,7 +17,7 @@ import type { BrainPlan } from "./brains/select";
 import { TtlCache } from "./cache";
 import { NotFoundError } from "./errors";
 import { publishOrgEvent } from "./events";
-import { getMachine } from "./machines";
+import { getMachine, machineOnline } from "./machines";
 import { requirePermission } from "./organizations";
 import { enqueue } from "./outbox";
 import { RUN_STALE_MS, replyThreadOf } from "./runs";
@@ -45,7 +45,13 @@ export const ROOM_BEHIND_RETRY_MS = 10_000;
  */
 export const ROOM_RANK_AGE_MS = 10 * 60_000;
 
-const inLine = and(
+/**
+ * How long a run may wait for room before it leaves the line (`COMPUTER_QUEUE_MAX_WAIT_MINUTES`): a run that never gets
+ * admitted (its job lost, its turn refused again and again) would otherwise hold the head of the line for good.
+ */
+export const ROOM_MAX_WAIT_MS = 30 * 60_000;
+
+export const inLine = and(
   eq(agentRuns.status, "waiting_input"),
   sql`${agentRuns.transcript}->'waitingForBrain'->>'code' = 'busy'`,
 );
@@ -74,6 +80,9 @@ export type RoomRank = 0 | 1 | 2;
  * sign-in at its cap, `ROOM_ASK_SPACING_MS`, or the runner's own room check (`no_slot`, free memory on Linux).
  */
 export type RoomWaitCause = "line" | "sign_in" | "spacing" | "memory";
+
+/** What the line's views say a run waits for: a gate above, or its computer being away (`machine_offline`). */
+export type QueueWaitCause = RoomWaitCause | "machine_offline";
 
 /**
  * Runs one Claude plan sign-in thinks for at once, by default (`CLAUDE_PLAN_CONCURRENCY`). A personal plan used by
@@ -322,6 +331,10 @@ export interface QueueWaiting extends QueueAccess {
   estimatedStartAt: string | null;
   /** Who it waits for: for the head, the running turn expected to end first; behind it, the agents ahead in line. */
   after: string[];
+  /** How long it has waited for room (ms); null when its start isn't recorded. */
+  waitedMs: number | null;
+  /** The gate that held it at its last look; `machine_offline` when its computer is away; null when not recorded. */
+  cause: QueueWaitCause | null;
 }
 
 export interface ComputerQueue {
@@ -536,7 +549,11 @@ export async function computerQueue(
         ),
       )
       .orderBy(askAt),
-    lineRows({ people: sql<boolean>`${peopleSql}` })
+    lineRows({
+      people: sql<boolean>`${peopleSql}`,
+      since: sql<string | null>`${agentRuns.transcript}->>'roomWaitSince'`,
+      room: sql<string | null>`${agentRuns.transcript}->'waitingForBrain'->>'room'`,
+    })
       .where(and(eq(agentRuns.orgId, orgId), shownInLine(machineId)))
       .orderBy(rankSql(now), sinceSql, agentRuns.id),
     typicalTurns(db, orgId),
@@ -544,6 +561,7 @@ export async function computerQueue(
   const working = workingRows.map((r) => ({ ...r, startedAt: Number(r.askAt) }));
   const est = estimateQueue(now, working, waitingRows, typical);
   const iso = (ms: number | null | undefined) => (ms == null ? null : new Date(ms).toISOString());
+  const offline = !machineOnline(machine, new Date(now));
   const where = (r: {
     channelId: string;
     threadRootId: string;
@@ -586,6 +604,8 @@ export async function computerQueue(
       position: i + 1,
       estimatedStartAt: iso(est.starts[i]),
       after: est.after[i] ?? [],
+      waitedMs: r.since == null ? null : Math.max(0, now - Number(r.since)),
+      cause: offline ? "machine_offline" : ((r.room as RoomWaitCause | null) ?? null),
       ...access(r),
     })),
   };
